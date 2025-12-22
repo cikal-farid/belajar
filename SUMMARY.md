@@ -73,6 +73,7 @@
   * [Update](0.-devops-v3/update.md)
   * [reboot vm](0.-devops-v3/reboot-vm.md)
   * [Page 1](0.-devops-v3/page-1.md)
+* [0. DevOps V3.1](0.-devops-v3.1.md)
 * [0. DevOps V4](0.-devops-v4.md)
 * [1. Docker and Harbor](1.-docker-and-harbor.md)
 * [CI/CD KuberMenetas](ci-cd-kubermenetas.md)
