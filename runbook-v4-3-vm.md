@@ -1,4 +1,4 @@
-# 0. DevOps V3.1.2
+# RUNBOOK V4 (3 VM)
 
 Siap. Aku bikinkan **RUNBOOK FINAL 3 VM** yang **anti-error push pertama** (menghindari kendala yang kamu alami: `dpkg lock`, DNS GitLab, docker permission runner, `6443 refused`, worker `NotReady`, containerd registry, dan edge nginx “host not found”). Sekalian aku rapihkan **nama VM + IP** sesuai yang kamu mau:
 
@@ -372,11 +372,15 @@ EOF
 
 chmod 700 ~/.ssh
 chmod 600 ~/.ssh/id_ed25519 ~/.ssh/config
-
-ssh -T git@gitlab-443
 ```
 
 > Copy `~/.ssh/id_ed25519.pub` ke GitLab → SSH Keys.
+
+Tes koneksi :
+
+```bash
+ssh -T git@gitlab-443
+```
 
 ***
 
@@ -563,6 +567,225 @@ scp cikal@192.168.56.43:~/.kube/config ./kubeconfig-prod
 
 Lalu upload `kubeconfig-prod` ke variable `KUBECONFIG_PROD` (Type: File).
 
+#### Sebelum melakukan push pertama wajib mengikuti dibawah ini :
+
+Edit file .gitlab-ci.yml
+
+```bash
+nano ~/three-body-problem/.gitlab-ci.yml
+```
+
+Paste ke .gitlab-ci.yml
+
+```bash
+stages:
+  - build
+  - push
+  - deploy
+
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - when: never
+
+variables:
+  DOCKER_BUILDKIT: "1"
+  TAG: "$CI_COMMIT_SHORT_SHA"
+
+  # Harbor HTTP (insecure) di vm-docker
+  # IMPORTANT: docker daemon runner WAJIB sudah allow insecure registry harbor.local:8080
+  HARBOR_HOST: "harbor.local:8080"
+  HARBOR_PROJECT: "threebody"
+  REGISTRY: "$HARBOR_HOST/$HARBOR_PROJECT"
+
+  K8S_NS: "threebody-prod"
+  KUBECTL_VERSION: "v1.30.14"
+  K8S_ROLLOUT_TIMEOUT: "15m"
+  K8S_IMAGEPULL_SECRET: "harbor-regcred"
+
+default:
+  tags: ["deploy"]   # pastikan runner vm-docker punya tag 'deploy'
+  before_script:
+    - set -euo pipefail
+
+build_check:
+  stage: build
+  script: |
+    echo "==> [build] build-check images (tanpa push)"
+    docker build \
+      --build-arg REACT_APP_GO_API_BASE=/go \
+      --build-arg REACT_APP_LARAVEL_API_BASE=/laravel \
+      -t "$REGISTRY/frontend:$TAG" \
+      -f frontend/Dockerfile frontend
+
+    docker build -t "$REGISTRY/go:$TAG" -f go/Dockerfile go
+    docker build -t "$REGISTRY/laravel:$TAG" -f laravel/Dockerfile laravel
+
+push_images:
+  stage: push
+  needs: ["build_check"]
+  script: |
+    echo "==> [push] sanity check harbor registry"
+    # 401 itu normal artinya /v2 hidup
+    (curl -fsSI "http://harbor.local:8080/v2/" | head -n 1) || true
+
+    echo "==> [push] login Harbor (HTTP insecure lab)"
+    : "${HARBOR_USERNAME:?Missing HARBOR_USERNAME}"
+    : "${HARBOR_PASSWORD:?Missing HARBOR_PASSWORD}"
+    echo "$HARBOR_PASSWORD" | docker login "$HARBOR_HOST" -u "$HARBOR_USERNAME" --password-stdin
+
+    echo "==> [push] build+push images (TAG=$TAG)"
+    docker build \
+      --build-arg REACT_APP_GO_API_BASE=/go \
+      --build-arg REACT_APP_LARAVEL_API_BASE=/laravel \
+      -t "$REGISTRY/frontend:$TAG" \
+      -f frontend/Dockerfile frontend
+    docker push "$REGISTRY/frontend:$TAG"
+
+    docker build -t "$REGISTRY/go:$TAG" -f go/Dockerfile go
+    docker push "$REGISTRY/go:$TAG"
+
+    docker build -t "$REGISTRY/laravel:$TAG" -f laravel/Dockerfile laravel
+    docker push "$REGISTRY/laravel:$TAG"
+
+deploy:
+  stage: deploy
+  needs: ["push_images"]
+  script: |
+    echo "==> [deploy] validasi variables"
+    : "${KUBECONFIG_PROD:?Missing KUBECONFIG_PROD (GitLab Variables Type: File)}"
+    : "${HARBOR_USERNAME:?Missing HARBOR_USERNAME}"
+    : "${HARBOR_PASSWORD:?Missing HARBOR_PASSWORD}"
+    : "${MYSQL_ROOT_PASSWORD:?Missing MYSQL_ROOT_PASSWORD}"
+    : "${MYSQL_DATABASE:?Missing MYSQL_DATABASE}"
+    : "${MYSQL_USER:?Missing MYSQL_USER}"
+    : "${MYSQL_PASSWORD:?Missing MYSQL_PASSWORD}"
+    : "${LARAVEL_APP_KEY:?Missing LARAVEL_APP_KEY}"
+
+    echo "==> [deploy] siapkan kubectl (tanpa sudo, aman untuk runner shell)"
+    mkdir -p .bin
+    if [ ! -x .bin/kubectl ]; then
+      curl -fsSL -o .bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+      chmod +x .bin/kubectl
+    fi
+    export PATH="$PWD/.bin:$PATH"
+    kubectl version --client=true
+
+    echo "==> [deploy] set kubeconfig dari File Variable"
+    export KUBECONFIG="$KUBECONFIG_PROD"
+
+    echo "==> [deploy] cek cluster"
+    kubectl get nodes -o wide
+
+    echo "==> [deploy] pastikan namespace"
+    kubectl get ns "$K8S_NS" >/dev/null 2>&1 || kubectl create ns "$K8S_NS"
+
+    echo "==> [deploy] create/update app-secrets"
+    kubectl -n "$K8S_NS" create secret generic app-secrets \
+      --from-literal=MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+      --from-literal=MYSQL_DATABASE="$MYSQL_DATABASE" \
+      --from-literal=MYSQL_USER="$MYSQL_USER" \
+      --from-literal=MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+      --from-literal=LARAVEL_APP_KEY="$LARAVEL_APP_KEY" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+    echo "==> [deploy] create/update imagePullSecret Harbor"
+    kubectl -n "$K8S_NS" create secret docker-registry "$K8S_IMAGEPULL_SECRET" \
+      --docker-server="$HARBOR_HOST" \
+      --docker-username="$HARBOR_USERNAME" \
+      --docker-password="$HARBOR_PASSWORD" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+    echo "==> [deploy] attach imagePullSecret ke default serviceaccount (FIX QUOTE)"
+    kubectl -n "$K8S_NS" patch serviceaccount default \
+      -p "{\"imagePullSecrets\": [{\"name\": \"$K8S_IMAGEPULL_SECRET\"}]}" >/dev/null || true
+
+    echo "==> [deploy] apply manifests (NodePort + mysql + deployments)"
+    kubectl apply -f deploy/k8s/base/
+
+    echo "==> [deploy] update image tag"
+    kubectl -n "$K8S_NS" set image deployment/frontend frontend="$REGISTRY/frontend:$TAG"
+    kubectl -n "$K8S_NS" set image deployment/go go="$REGISTRY/go:$TAG"
+    kubectl -n "$K8S_NS" set image deployment/laravel laravel="$REGISTRY/laravel:$TAG"
+
+    echo "==> [deploy] rollout"
+    kubectl -n "$K8S_NS" rollout status deployment/frontend --timeout="$K8S_ROLLOUT_TIMEOUT" || (
+      echo "---- DEBUG (frontend rollout gagal) ----"
+      kubectl -n "$K8S_NS" get pods -o wide || true
+      kubectl -n "$K8S_NS" get events --sort-by=.lastTimestamp | tail -n 120 || true
+      kubectl -n "$K8S_NS" describe deploy frontend || true
+      kubectl -n "$K8S_NS" describe pod -l app=frontend || true
+      exit 1
+    )
+    kubectl -n "$K8S_NS" rollout status deployment/go --timeout="$K8S_ROLLOUT_TIMEOUT"
+    kubectl -n "$K8S_NS" rollout status deployment/laravel --timeout="$K8S_ROLLOUT_TIMEOUT"
+    kubectl -n "$K8S_NS" rollout status statefulset/mysql --timeout="$K8S_ROLLOUT_TIMEOUT" || true
+
+    echo "==> [deploy] ringkasan"
+    kubectl -n "$K8S_NS" get deploy -o wide
+    kubectl -n "$K8S_NS" get svc -o wide
+    kubectl -n "$K8S_NS" get pods -o wide
+
+    echo "==> [deploy] healthcheck via edge nginx (hit.local di vm-docker)"
+    for i in $(seq 1 60); do
+      if curl -kfsS --resolve hit.local:443:127.0.0.1 https://hit.local/ >/dev/null 2>&1; then
+        echo "OK: hit.local sehat"
+        exit 0
+      fi
+      sleep 2
+    done
+
+    echo "ERROR: hit.local healthcheck gagal"
+    kubectl -n "$K8S_NS" get pods -o wide || true
+    kubectl -n "$K8S_NS" describe pods || true
+    exit 1
+
+```
+
+Edit file deploy/edge/nginx/conf.d/edge.conf
+
+```bash
+nano deploy/edge/nginx/conf.d/edge.conf
+```
+
+Paste ke deploy/edge/nginx/conf.d/edge.conf
+
+```bash
+# rate limiting zone
+limit_req_zone $binary_remote_addr zone=api_rl:10m rate=5r/s;
+
+server {
+  listen 80;
+  server_name hit.local;
+  return 301 https://$host$request_uri;
+}
+
+server {
+  listen 443 ssl;
+  server_name hit.local;
+
+  ssl_certificate     /etc/nginx/certs/tls.crt;
+  ssl_certificate_key /etc/nginx/certs/tls.key;
+
+  # frontend (NodePort)
+  location / {
+    proxy_pass http://192.168.56.44:30080;
+  }
+
+  # go (NodePort)
+  location /go/ {
+    limit_req zone=api_rl burst=10 nodelay;
+    proxy_pass http://192.168.56.44:30081/;
+  }
+
+  # laravel (NodePort)
+  location /laravel/ {
+    limit_req zone=api_rl burst=10 nodelay;
+    proxy_pass http://192.168.56.44:30082/;
+  }
+}
+```
+
 ***
 
 ## 5) Alur PUSH pertama (biar pipeline langsung aman)
@@ -571,14 +794,77 @@ Lalu upload `kubeconfig-prod` ke variable `KUBECONFIG_PROD` (Type: File).
 2. Pastikan Harbor project `threebody` dan robot account sudah dibuat.
 3. Push ke GitLab (pakai altssh 443 kalau perlu):
 
+## A) JALANKAN DI vm-docker (lokasi: `~/three-body-problem`)
+
+### 1) Pastikan repo lokal jadi Git repo (INIT)
+
 ```bash
+cd ~/three-body-problem
+
+# cek file ada
+ls -lah
+
+# init git repo (karena belum ada .git)
+git init
+
+# set default branch git biar ke depan nggak muncul warning
+git config --global init.defaultBranch main
+
+# set identitas git biar commit tidak gagal
+git config --global user.name "cikalfarid"
+git config --global user.email "cikalfarid@users.noreply.gitlab.com"
+
+# pastikan branch main
+git branch -M main
+```
+
+## 3) Tes koneksi
+
+```bash
+ssh -T git@gitlab-443
+```
+
+## 3) Set remote ke repo kamu (pakai 443)
+
+Repo kamu: `git@gitlab.com:cikalfarid/three-body-problem.git`
+
+Untuk 443 jadi:\
+`git@gitlab-443:cikalfarid/three-body-problem.git`
+
+```bash
+cd ~/three-body-problem
+git remote remove origin 2>/dev/null || true
+git remote add origin git@gitlab-443:cikalfarid/three-body-problem.git
 git remote -v
-# set remote pakai alias gitlab-443 (port 443)
-git remote set-url origin git@gitlab-443:<USERNAME_GITLAB>/<REPO>.git
+```
+
+***
+
+## 4) Commit + push (overwrite remote biar “kosong lalu diisi dari lokal”)
+
+Ini akan membuat isi branch `main` di GitLab **jadi sama persis** seperti folder lokal kamu.
+
+```bash
+cd ~/three-body-problem
 
 git add -A
-git commit -m "Runbook final + fix edge + fix k8s manifests + ci build/push/deploy"
-git push -u origin main
+git commit -m "initial: runbook V4 + ci build/push/deploy" || true
+
+git push -u origin main --force
+```
+
+***
+
+## Kalau `--force` ditolak (Protected Branch)
+
+Kalau muncul error “not allowed to force push / protected branch”, buka GitLab:\
+Project → Settings → Repository → Protected Branches → `main`
+
+* Unprotect dulu, atau izinkan Maintainer force push\
+  Lalu ulang:
+
+```bash
+git push -u origin main --force
 ```
 
 ***

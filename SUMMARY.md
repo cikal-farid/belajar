@@ -75,7 +75,7 @@
   * [Page 1](0.-devops-v3/page-1.md)
 * [0. DevOps V3.1](0.-devops-v3.1.md)
 * [0. DevOps V3.1.1](0.-devops-v3.1.1.md)
-* [0. DevOps V3.1.2](0.-devops-v3.1.2.md)
+* [RUNBOOK V4 (3 VM)](runbook-v4-3-vm.md)
 * [0. DevOps V3.2](0.-devops-v3.2.md)
 * [0. DevOps V4](0.-devops-v4.md)
 * [1. Docker and Harbor](1.-docker-and-harbor.md)
