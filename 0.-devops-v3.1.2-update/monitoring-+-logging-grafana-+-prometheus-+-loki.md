@@ -1,50 +1,59 @@
 # Monitoring + Logging (Grafana + Prometheus + Loki)
 
-Berikut **RUNBOOK FINAL – Monitoring + Logging (Grafana + Prometheus + Loki + Promtail)** yang sudah aku rapikan dari semua kendala yang kamu alami (bucketNames, schema\_config, rootfs read-only, memcached cache berat, port-forward aman, datasource Loki, dll). Ini versi **paling ringan & aman untuk lab 2 node** seperti setup kamu.
+Oke, **cek dulu sebelum perbaikan**: dari output kamu, cluster **sudah sehat** (2 node Ready, core pods Running). Error yang kamu temui **bukan dari K8s/monitoring-nya**, tapi karena **Helm belum terinstall** di `vm-k8s`:
 
-> **Target kamu:**
->
-> * Metrics: Prometheus (kube-prometheus-stack)
-> * Dashboard: Grafana
-> * Logging: Loki (SingleBinary ringan, tanpa PVC)
-> * Log Collector: Promtail (DaemonSet, ambil log semua pod/node → Loki)
-> * Akses UI dari host: via **systemd port-forward** di vm-k8s (bind ke IP vm-k8s saja, bukan 0.0.0.0)
+> `-bash: helm: command not found`
+
+Jadi runbook sebelumnya gagal di langkah repo karena tool `helm` belum ada.
+
+Di bawah ini aku tulis ulang **RUNBOOK FINAL (super detail, pemula-friendly, anti melenceng)** khusus untuk **Monitoring + Logging + utilitas akses UI**, dan aku mulai dari **install Helm dulu** karena itu yang sekarang bikin kamu stuck.
 
 ***
 
-## 0) Konteks & Asumsi (sesuai percakapan)
+## RUNBOOK FINAL — Monitoring + Logging (K8s 2 node, ringan & aman)
 
-* Cluster 2 node:
-  * **vm-k8s** (control-plane) IP: `192.168.56.43`
-  * **vm-worker** (worker) IP: `192.168.56.44`
-* Kamu menjalankan `kubectl/helm` dari **vm-k8s**.
-* Namespace: `monitoring`
-* Release Helm:
-  * `kps` = kube-prometheus-stack
-  * `loki` = grafana/loki
-  * `promtail` = grafana/promtail
+### A) Pre-check (wajib, kamu sudah OK)
 
-> Catatan: kita pakai mode “lab ringan” → **tanpa PVC** (data logs akan hilang kalau pod restart / node reboot). Ini sengaja supaya stabil di resource kecil.
-
-***
-
-## 1) Pre-check Wajib (cek dulu sebelum install)
-
-Jalankan di **vm-k8s**:
+Di `vm-k8s`:
 
 ```bash
 kubectl get nodes -o wide
 kubectl get pods -A | head
 ```
 
-Pastikan:
-
-* Node **Ready**
-* DNS & image pull aman (kalau sering ImagePullBackOff → bereskan DNS dulu seperti sebelumnya)
+✅ Lanjut kalau node **Ready** (punyamu sudah Ready).
 
 ***
 
-## 2) Install Helm Repo
+### B) Install Helm di vm-k8s (INI YANG KURANG)
+
+Kamu pakai Ubuntu 24.04, cara paling aman: **pakai apt**.
+
+#### B1) Install helm via apt (recommended)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y helm
+helm version
+```
+
+Kalau `apt install helm` ternyata tidak menemukan paket (kadang repo OS beda), pakai cara resmi Helm:
+
+#### B2) Install helm via script resmi (fallback, aman juga)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y curl ca-certificates gnupg
+
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version
+```
+
+✅ Kalau `helm version` keluar, berarti **Helm sudah beres**.
+
+***
+
+### C) Tambahkan Helm repo (prometheus + grafana)
 
 ```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -54,40 +63,46 @@ helm repo update
 
 ***
 
-## 3) Install Monitoring Metrics: kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
-
-### 3.1 Install
+### D) Buat namespace monitoring
 
 ```bash
 kubectl create ns monitoring 2>/dev/null || true
-
-helm upgrade --install kps prometheus-community/kube-prometheus-stack \
-  -n monitoring
+kubectl get ns | grep monitoring
 ```
 
-### 3.2 Tunggu pod running
+***
+
+### E) Install kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+
+> Ini yang bikin dashboard Kubernetes otomatis banyak seperti screenshot kamu.
+
+#### E1) Install
+
+```bash
+helm upgrade --install kps prometheus-community/kube-prometheus-stack -n monitoring
+```
+
+#### E2) Tunggu sampai Running
 
 ```bash
 kubectl -n monitoring get pods -o wide -w
 ```
 
-Minimal yang kamu lihat harus Running:
+Minimal yang harus Running:
 
-* `prometheus-kps-...`
 * `kps-grafana-...`
+* `prometheus-kps-...`
 * `alertmanager-kps-...`
 * `kps-kube-state-metrics...`
-* `kps-prometheus-node-exporter...` (di 2 node)
-
-> Kalau grafana sempat “Readiness/Liveness failed connect refused”, itu normal saat startup plugin. Biasanya stabil setelah beberapa menit.
+* `kps-prometheus-node-exporter...` (2 pod, tiap node 1)
 
 ***
 
-## 4) Akses UI secara Aman via systemd Port-Forward (Auto setelah reboot)
+### F) Akses Grafana & Prometheus dari host (tanpa NodePort/Ingress)
 
-**Kenapa begini?** Karena kamu mau akses dari host tanpa bikin NodePort/Ingress, dan lebih aman karena kita bind ke IP vm-k8s saja.
+Kita pakai **systemd port-forward**, dan **bind ke IP vm-k8s** (lebih aman daripada 0.0.0.0).
 
-### 4.1 Grafana Port-Forward (3000)
+#### F1) Service Port-forward Grafana (3000)
 
 ```bash
 sudo tee /etc/systemd/system/kpf-grafana.service >/dev/null <<'EOF'
@@ -108,7 +123,7 @@ WantedBy=multi-user.target
 EOF
 ```
 
-### 4.2 Prometheus Port-Forward (9090)
+#### F2) Service Port-forward Prometheus (9090)
 
 ```bash
 sudo tee /etc/systemd/system/kpf-prometheus.service >/dev/null <<'EOF'
@@ -127,13 +142,17 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now kpf-grafana.service
-sudo systemctl enable --now kpf-prometheus.service
 ```
 
-### 4.3 Cek listener + endpoint
+#### F3) Aktifkan
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now kpf-grafana
+sudo systemctl enable --now kpf-prometheus
+```
+
+#### F4) Cek listener & endpoint
 
 ```bash
 ss -lntp | egrep ':3000|:9090' || true
@@ -141,32 +160,31 @@ curl -fsSI http://192.168.56.43:3000/login | head -n 1
 curl -fsS  http://192.168.56.43:9090/-/ready | head -n 1
 ```
 
-### 4.4 Login Grafana
+#### F5) Login Grafana
 
-Ambil password admin:
+Password admin:
 
 ```bash
 kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo
 ```
 
-Buka:
+Akses:
 
 * Grafana: `http://192.168.56.43:3000`
 * Prometheus: `http://192.168.56.43:9090`
 
 ***
 
-## 5) Install Logging: Loki (versi ringan & stabil untuk lab)
+### G) Install Loki (Logging) — versi ringan & stabil (sesuai masalah kamu sebelumnya)
 
-> Ini bagian yang dulu error dan sudah kita “kunci” biar nggak kejadian lagi:
+**Ini versi yang sudah terbukti menghindari error yang kamu alami:**
 
-* Chart minta `bucketNames`
-* Chart minta `schema_config` → kita pakai `useTestSchema: true`
-* Error **read-only filesystem /var/loki** → kita set `readOnlyRootFilesystem: false` + mount `emptyDir` ke `/var/loki`
-* Memcached cache bikin Pending karena request memory besar → kita **disable** chunksCache & resultsCache
-* Helm test memaksa canary → kita **disable test** dan **disable canary**
+* wajib `bucketNames`
+* wajib `useTestSchema: true`
+* fix read-only `/var/loki`
+* disable caches berat + disable canary + disable helm test
 
-### 5.1 Values Loki (LAB)
+#### G1) Buat values Loki lab
 
 ```bash
 cat > /tmp/loki-values-lab.yaml <<'EOF'
@@ -210,7 +228,6 @@ gateway:
 minio:
   enabled: false
 
-# versi ringan: matikan komponen berat
 lokiCanary:
   enabled: false
 
@@ -226,32 +243,29 @@ write: { replicas: 0 }
 EOF
 ```
 
-### 5.2 Install/Upgrade Loki
+#### G2) Install Loki
 
 ```bash
 helm upgrade --install loki grafana/loki -n monitoring -f /tmp/loki-values-lab.yaml
-kubectl -n monitoring get pods -o wide | egrep -i 'loki|gateway'
 ```
 
-**Wajib sukses:**
-
-* `loki-0` harus **2/2 Running**
-* `loki-gateway` **Running**
-
-Cek cepat:
+#### G3) Validasi Loki
 
 ```bash
+kubectl -n monitoring get pods -o wide | egrep -i 'loki|gateway'
 kubectl -n monitoring get pod loki-0
-kubectl -n monitoring logs loki-0 -c loki --tail=50
 ```
+
+✅ Sukses kalau:
+
+* `loki-0` = **2/2 Running**
+* `loki-gateway` = **Running**
 
 ***
 
-## 6) Install Promtail (ambil log semua node/pod → push ke Loki)
+### H) Install Promtail (collector log) — dorong log ke Loki
 
-> Kamu sudah pakai promtail dan berhasil. Ini versi ringan sesuai lab.
-
-### 6.1 Values Promtail
+#### H1) Values promtail ringan
 
 ```bash
 cat > /tmp/promtail-values.yaml <<'EOF'
@@ -269,19 +283,21 @@ resources:
 EOF
 ```
 
-### 6.2 Install/Upgrade Promtail
+#### H2) Install promtail
 
 ```bash
 helm upgrade --install promtail grafana/promtail -n monitoring -f /tmp/promtail-values.yaml
 kubectl -n monitoring get pods -o wide | egrep -i 'promtail'
-kubectl -n monitoring get ds/promtail
+kubectl -n monitoring get ds promtail
 ```
+
+✅ Harus ada 2 pod promtail (karena 2 node).
 
 ***
 
-## 7) Tambahkan Datasource Loki ke Grafana (via kube-prometheus-stack)
+### I) Tambahkan DataSource Loki ke Grafana (biar otomatis muncul di Explore)
 
-Ini biar Grafana otomatis punya datasource Loki tanpa klik manual.
+#### I1) Buat values tambahan untuk kps
 
 ```bash
 cat > /tmp/kps-datasource-loki.yaml <<'EOF'
@@ -295,15 +311,19 @@ grafana:
       jsonData:
         maxLines: 1000
 EOF
+```
 
+#### I2) Upgrade kps
+
+```bash
 helm upgrade kps prometheus-community/kube-prometheus-stack -n monitoring -f /tmp/kps-datasource-loki.yaml
 ```
 
 ***
 
-## 8) (Opsional) Port-forward Loki Gateway untuk akses dari luar cluster
+### J) (Opsional) Akses Loki gateway dari host (buat test manual)
 
-Kalau kamu mau test dari host (bukan dari Grafana), bikin service systemd:
+> Ini opsional. Grafana sebenarnya cukup akses internal service.
 
 ```bash
 sudo tee /etc/systemd/system/kpf-loki.service >/dev/null <<'EOF'
@@ -324,12 +344,11 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now kpf-loki.service
+sudo systemctl enable --now kpf-loki
 ss -lntp | egrep ':3100' || true
 ```
 
-**Catatan penting (sesuai kendala kamu):**\
-Karena ini lewat **gateway**, endpoint health `/ready` bisa **404** (normal). Untuk test, pakai endpoint Loki via gateway path `/loki/...`, contoh:
+Test:
 
 ```bash
 curl -fsS http://192.168.56.43:3100/loki/api/v1/status/buildinfo | head
@@ -337,117 +356,66 @@ curl -fsS http://192.168.56.43:3100/loki/api/v1/status/buildinfo | head
 
 ***
 
-## 9) Cara Melihat Monitoring di UI Grafana (yang kamu bingung tadi)
+## K) Cara “sekali akses URL langsung muncul monitoring”
 
-### 9.1 Lihat dashboard bawaan
+Ini yang kamu tanya di UI.
 
-Di Grafana:
+Grafana default masuk halaman home, tapi kamu bisa set **Home Dashboard** supaya begitu buka `http://IP:3000` langsung muncul dashboard monitoring.
 
-* Menu kiri → **Dashboards**
-* Pilih salah satu yang paling penting:
-  * **Kubernetes / Compute Resources / Cluster**
-  * **Kubernetes / Compute Resources / Namespace (Pods)**
-  * **Kubernetes / API server**
-  * **CoreDNS**
-  * **etcd**
-  * **Alertmanager / Overview**
+#### K1) Set Home Dashboard dari UI
 
-### 9.2 Biar buka `http://IP:3000/` langsung masuk dashboard monitoring (set Home Dashboard)
+1. Grafana → menu kiri **Dashboards**
+2. Pilih dashboard yang kamu mau jadi default (contoh:\
+   **Kubernetes / Compute Resources / Cluster**)
+3. Klik **⭐ Star** (biar gampang dicari)
+4. Klik icon user kanan atas → **Preferences**
+5. Set **Home dashboard** → pilih dashboard yang kamu bintangin
+6. Save
 
-* Klik user icon kanan atas → **Preferences**
-* Set **Home dashboard** = misalnya **Kubernetes / Compute Resources / Cluster**
-* Save
-
-> Setelah itu, buka grafana langsung tampil monitoring.
-
-### 9.3 Lihat Logs (Loki)
-
-* Menu kiri → **Explore**
-* Pilih datasource: **Loki**
-* Coba filter:
-  * `namespace="threebody-prod"`
-  * pilih `pod="laravel-..."`
+✅ Hasil: buka `http://192.168.56.43:3000/` langsung tampil dashboard itu.
 
 ***
 
-## 10) Verifikasi Final (Checklist “AMAN”)
+## L) Checklist Final (harus hijau semua)
 
-Jalankan ini, hasilnya harus sesuai:
+Jalankan:
 
 ```bash
-# Semua komponen utama running
 kubectl -n monitoring get pods -o wide | egrep -i 'grafana|prometheus|alertmanager|loki|promtail'
-
-# Loki wajib 2/2
 kubectl -n monitoring get pod loki-0
-
-# Promtail wajib 2 pod (daemonset 2 node)
 kubectl -n monitoring get ds promtail
-
-# Listener port-forward
 ss -lntp | egrep ':3000|:9090|:3100' || true
-
-# Endpoint basic
 curl -fsSI http://192.168.56.43:3000/login | head -n 1
 curl -fsS  http://192.168.56.43:9090/-/ready | head -n 1
 ```
 
 ***
 
-## 11) Hal yang WAJIB kamu “SAVE” biar runbook nggak hilang
+## M) WAJIB “SAVE” (supaya tidak hilang & tidak ngulang)
 
-Supaya nggak ulang dari nol kalau lupa, **jangan simpan hanya di /tmp**.
-
-Buat folder repo, contoh:
+Jangan taruh hanya di `/tmp`, pindahkan ke folder permanen:
 
 ```bash
-mkdir -p ops/monitoring
-cp /tmp/loki-values-lab.yaml ops/monitoring/
-cp /tmp/promtail-values.yaml ops/monitoring/
-cp /tmp/kps-datasource-loki.yaml ops/monitoring/
+mkdir -p ~/ops/monitoring
+cp /tmp/loki-values-lab.yaml ~/ops/monitoring/
+cp /tmp/promtail-values.yaml ~/ops/monitoring/
+cp /tmp/kps-datasource-loki.yaml ~/ops/monitoring/
 ```
 
-Lalu commit ke Git supaya permanen.
+Kalau repo git kamu ada, commit file ini.
 
 ***
 
-## 12) Troubleshooting cepat (berdasarkan error yang kamu alami)
+### Sekarang langkah kamu berikutnya (tanpa tanya ulang)
 
-#### A) `loki-0 CrashLoopBackOff: mkdir /var/loki read-only file system`
+Karena error kamu saat ini **helm belum ada**, lakukan ini dulu:
 
-✅ Fix: pastikan values punya:
-
-* `loki.containerSecurityContext.readOnlyRootFilesystem: false`
-* mount `emptyDir` ke `/var/loki`
-
-#### B) `loki-chunks-cache Pending Insufficient memory/cpu`
-
-✅ Fix: disable caches:
-
-* `chunksCache.enabled: false`
-* `resultsCache.enabled: false`
-
-#### C) Helm bilang “must provide schema\_config”
-
-✅ Fix: `loki.useTestSchema: true`
-
-#### D) Helm bilang “Please define bucketNames”
-
-✅ Fix: isi:
-
-```yaml
-loki:
-  storage:
-    bucketNames:
-      chunks: chunks
-      ruler: ruler
-      admin: admin
+```bash
+sudo apt-get update
+sudo apt-get install -y helm
+helm version
 ```
 
-#### E) Promtail chart deprecated
+Kalau `helm version` sudah keluar, lanjutkan ke bagian **C**.
 
-Itu warning saja, masih jalan. Untuk lab aman.
-
-***
-
-Kalau kamu mau, aku bisa lanjutkan runbook “final keseluruhan project” (CI/CD + K8s deploy + Monitoring + Logging) jadi 1 dokumen rapi. Tapi untuk request kamu barusan, ini sudah **final monitoring + logging** dan sudah “dikunci” supaya tidak mengulang error-error kamu sebelumnya.
+Kalau setelah install helm ada error lain (misal image pull, pod pending, dsb), kirim output step yang error itu, dan aku akan perbaiki sesuai pola kendala yang sudah terjadi sebelumnya.
