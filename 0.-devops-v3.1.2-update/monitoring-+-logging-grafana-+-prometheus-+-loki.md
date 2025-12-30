@@ -1,59 +1,90 @@
 # Monitoring + Logging (Grafana + Prometheus + Loki)
 
-Oke, **cek dulu sebelum perbaikan**: dari output kamu, cluster **sudah sehat** (2 node Ready, core pods Running). Error yang kamu temui **bukan dari K8s/monitoring-nya**, tapi karena **Helm belum terinstall** di `vm-k8s`:
+Sip — dari output kamu, prosesnya **sudah aman** dan akar masalahnya ketemu: **`baltocdn.com` memang tidak bisa di-resolve** di environment kamu, tapi **`get.helm.sh` + `github.com` bisa**. Jadi runbook harus **JANGAN bergantung ke repo APT baltocdn**, dan default install Helm pakai **binary dari get.helm.sh** (yang terbukti sukses di kamu).
 
-> `-bash: helm: command not found`
-
-Jadi runbook sebelumnya gagal di langkah repo karena tool `helm` belum ada.
-
-Di bawah ini aku tulis ulang **RUNBOOK FINAL (super detail, pemula-friendly, anti melenceng)** khusus untuk **Monitoring + Logging + utilitas akses UI**, dan aku mulai dari **install Helm dulu** karena itu yang sekarang bikin kamu stuck.
+Di bawah ini **runbook final (monitoring + logging) versi “anti gagal”** sesuai kendala yang kamu alami.
 
 ***
 
-## RUNBOOK FINAL — Monitoring + Logging (K8s 2 node, ringan & aman)
+## RUNBOOK FINAL — Monitoring + Logging (2 Node Lab)
 
-### A) Pre-check (wajib, kamu sudah OK)
+Target:
 
-Di `vm-k8s`:
+* **Monitoring**: kube-prometheus-stack (Prometheus + Grafana + Node Exporter + KSM)
+* **Logging**: Loki (single binary, lab ringan) + Promtail (kirim log pod ke Loki)
+* **Akses UI**: via **systemd port-forward** dari vm-k8s (IP 192.168.56.43)
+
+> Semua perintah dijalankan di **vm-k8s** sebagai user `cikal` (kecuali kalau tertulis lain).
+
+***
+
+### 0) Prasyarat cek cepat (wajib)
 
 ```bash
 kubectl get nodes -o wide
 kubectl get pods -A | head
 ```
 
-✅ Lanjut kalau node **Ready** (punyamu sudah Ready).
+Harusnya node **Ready**.
 
 ***
 
-### B) Install Helm di vm-k8s (INI YANG KURANG)
+### 1) DNS fix (wajib supaya Helm chart repo bisa diakses)
 
-Kamu pakai Ubuntu 24.04, cara paling aman: **pakai apt**.
-
-#### B1) Install helm via apt (recommended)
+> Ini mencegah error mirip “Could not resolve host …” (seperti baltocdn.com).
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y helm
-helm version
+sudo tee /etc/systemd/resolved.conf >/dev/null <<'EOF'
+[Resolve]
+DNS=1.1.1.1 8.8.8.8
+FallbackDNS=9.9.9.9 8.8.4.4
+DNSStubListener=yes
+EOF
+
+sudo systemctl restart systemd-resolved
+sudo resolvectl flush-caches
+sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
 ```
 
-Kalau `apt install helm` ternyata tidak menemukan paket (kadang repo OS beda), pakai cara resmi Helm:
-
-#### B2) Install helm via script resmi (fallback, aman juga)
+Cek:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y curl ca-certificates gnupg
-
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm version
+cat /etc/resolv.conf
+getent hosts github.com || true
+getent hosts get.helm.sh || true
 ```
 
-✅ Kalau `helm version` keluar, berarti **Helm sudah beres**.
+> Catatan: `baltocdn.com` boleh saja tetap gagal — runbook ini **tidak butuh baltocdn**.
 
 ***
 
-### C) Tambahkan Helm repo (prometheus + grafana)
+### 2) Helm install (VERSI AMAN — binary dari get.helm.sh)
+
+> Ini yang kamu sudah buktikan berhasil.
+
+**Bersihkan sisa repo helm APT (kalau pernah coba):**
+
+```bash
+sudo rm -f /etc/apt/sources.list.d/helm-stable-debian.list
+sudo rm -f /etc/apt/keyrings/helm.gpg
+sudo apt-get update
+```
+
+**Install Helm binary:**
+
+```bash
+cd /tmp
+VER="v3.14.4"
+curl -fsSLO "https://get.helm.sh/helm-${VER}-linux-amd64.tar.gz"
+tar -xzf "helm-${VER}-linux-amd64.tar.gz"
+sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+helm version
+which helm
+```
+
+***
+
+### 3) Add repo chart (Prometheus + Grafana)
 
 ```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -63,52 +94,39 @@ helm repo update
 
 ***
 
-### D) Buat namespace monitoring
+### 4) Install Monitoring (kube-prometheus-stack)
 
 ```bash
-kubectl create ns monitoring 2>/dev/null || true
-kubectl get ns | grep monitoring
-```
+kubectl get ns monitoring >/dev/null 2>&1 || kubectl create ns monitoring
 
-***
-
-### E) Install kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
-
-> Ini yang bikin dashboard Kubernetes otomatis banyak seperti screenshot kamu.
-
-#### E1) Install
-
-```bash
 helm upgrade --install kps prometheus-community/kube-prometheus-stack -n monitoring
 ```
 
-#### E2) Tunggu sampai Running
+Tunggu siap:
 
 ```bash
-kubectl -n monitoring get pods -o wide -w
+kubectl -n monitoring get pods -o wide
 ```
 
-Minimal yang harus Running:
+Ambil password Grafana:
 
-* `kps-grafana-...`
-* `prometheus-kps-...`
-* `alertmanager-kps-...`
-* `kps-kube-state-metrics...`
-* `kps-prometheus-node-exporter...` (2 pod, tiap node 1)
+```bash
+kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
 
 ***
 
-### F) Akses Grafana & Prometheus dari host (tanpa NodePort/Ingress)
+### 5) Akses Grafana + Prometheus pakai systemd (TANPA port-forward manual)
 
-Kita pakai **systemd port-forward**, dan **bind ke IP vm-k8s** (lebih aman daripada 0.0.0.0).
+> Pakai bind ke IP host-only **192.168.56.43** (lebih aman daripada 0.0.0.0)
 
-#### F1) Service Port-forward Grafana (3000)
+#### Grafana
 
 ```bash
 sudo tee /etc/systemd/system/kpf-grafana.service >/dev/null <<'EOF'
 [Unit]
 Description=Kubernetes Port-Forward Grafana (monitoring)
-After=network-online.target
+After=network-online.target kubelet.service
 Wants=network-online.target
 
 [Service]
@@ -123,13 +141,13 @@ WantedBy=multi-user.target
 EOF
 ```
 
-#### F2) Service Port-forward Prometheus (9090)
+#### Prometheus
 
 ```bash
 sudo tee /etc/systemd/system/kpf-prometheus.service >/dev/null <<'EOF'
 [Unit]
 Description=Kubernetes Port-Forward Prometheus (monitoring)
-After=network-online.target
+After=network-online.target kubelet.service
 Wants=network-online.target
 
 [Service]
@@ -142,49 +160,29 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
-```
 
-#### F3) Aktifkan
-
-```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now kpf-grafana
-sudo systemctl enable --now kpf-prometheus
+sudo systemctl enable --now kpf-grafana kpf-prometheus
 ```
 
-#### F4) Cek listener & endpoint
+Cek:
 
 ```bash
-ss -lntp | egrep ':3000|:9090' || true
-curl -fsSI http://192.168.56.43:3000/login | head -n 1
-curl -fsS  http://192.168.56.43:9090/-/ready | head -n 1
+ss -lntp | egrep ':3000|:9090'
+curl -fsS http://192.168.56.43:3000/login | head -n 1
+curl -fsS http://192.168.56.43:9090/-/ready
 ```
-
-#### F5) Login Grafana
-
-Password admin:
-
-```bash
-kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo
-```
-
-Akses:
-
-* Grafana: `http://192.168.56.43:3000`
-* Prometheus: `http://192.168.56.43:9090`
 
 ***
 
-### G) Install Loki (Logging) — versi ringan & stabil (sesuai masalah kamu sebelumnya)
+### 6) Install Loki (VERSI LAB RINGAN + anti CrashLoop read-only)
 
-**Ini versi yang sudah terbukti menghindari error yang kamu alami:**
+Ini versi yang **kamu sudah buktikan stabil**:
 
-* wajib `bucketNames`
-* wajib `useTestSchema: true`
-* fix read-only `/var/loki`
-* disable caches berat + disable canary + disable helm test
-
-#### G1) Buat values Loki lab
+* `test.enabled=false` (biar tidak maksa canary)
+* `readOnlyRootFilesystem=false`
+* mount `/var/loki` pakai `emptyDir`
+* matikan cache chunks/results + canary (biar tidak Pending / makan RAM besar)
 
 ```bash
 cat > /tmp/loki-values-lab.yaml <<'EOF'
@@ -241,31 +239,22 @@ backend: { replicas: 0 }
 read: { replicas: 0 }
 write: { replicas: 0 }
 EOF
-```
 
-#### G2) Install Loki
-
-```bash
 helm upgrade --install loki grafana/loki -n monitoring -f /tmp/loki-values-lab.yaml
 ```
 
-#### G3) Validasi Loki
+Tunggu:
 
 ```bash
-kubectl -n monitoring get pods -o wide | egrep -i 'loki|gateway'
-kubectl -n monitoring get pod loki-0
+kubectl -n monitoring get pod loki-0 -w
+kubectl -n monitoring get svc | egrep -i 'loki|memberlist|gateway'
 ```
-
-✅ Sukses kalau:
-
-* `loki-0` = **2/2 Running**
-* `loki-gateway` = **Running**
 
 ***
 
-### H) Install Promtail (collector log) — dorong log ke Loki
+### 7) Install Promtail (kirim log pod ke Loki)
 
-#### H1) Values promtail ringan
+> Chart promtail memang deprecated, tapi **masih jalan** buat lab. Ini sesuai yang kamu pakai.
 
 ```bash
 cat > /tmp/promtail-values.yaml <<'EOF'
@@ -281,23 +270,15 @@ resources:
     cpu: 200m
     memory: 256Mi
 EOF
-```
 
-#### H2) Install promtail
-
-```bash
 helm upgrade --install promtail grafana/promtail -n monitoring -f /tmp/promtail-values.yaml
-kubectl -n monitoring get pods -o wide | egrep -i 'promtail'
-kubectl -n monitoring get ds promtail
+kubectl -n monitoring get ds/promtail
+kubectl -n monitoring get pods -o wide | egrep -i promtail
 ```
-
-✅ Harus ada 2 pod promtail (karena 2 node).
 
 ***
 
-### I) Tambahkan DataSource Loki ke Grafana (biar otomatis muncul di Explore)
-
-#### I1) Buat values tambahan untuk kps
+### 8) Tambahkan Loki sebagai Data Source Grafana (via Helm upgrade kps)
 
 ```bash
 cat > /tmp/kps-datasource-loki.yaml <<'EOF'
@@ -311,25 +292,22 @@ grafana:
       jsonData:
         maxLines: 1000
 EOF
-```
 
-#### I2) Upgrade kps
-
-```bash
 helm upgrade kps prometheus-community/kube-prometheus-stack -n monitoring -f /tmp/kps-datasource-loki.yaml
+kubectl -n monitoring rollout status deploy/kps-grafana
 ```
 
 ***
 
-### J) (Opsional) Akses Loki gateway dari host (buat test manual)
+### 9) Akses Loki gateway dari luar (systemd port-forward)
 
-> Ini opsional. Grafana sebenarnya cukup akses internal service.
+> Penting: karena yang kamu forward adalah **gateway (nginx)**, endpoint yang benar **pakai prefix `/loki`**, bukan `/ready`.
 
 ```bash
 sudo tee /etc/systemd/system/kpf-loki.service >/dev/null <<'EOF'
 [Unit]
 Description=Kubernetes Port-Forward Loki Gateway (monitoring)
-After=network-online.target
+After=network-online.target kubelet.service
 Wants=network-online.target
 
 [Service]
@@ -345,77 +323,105 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now kpf-loki
-ss -lntp | egrep ':3100' || true
 ```
 
-Test:
+Cek:
 
 ```bash
+ss -lntp | egrep ':3100'
+curl -fsS "http://192.168.56.43:3100/loki/api/v1/status/buildinfo" | head
+```
+
+***
+
+## 10) Cara lihat tampilan monitoring di Grafana (buat pemula)
+
+1. Buka browser di host kamu:
+
+* Grafana: `http://192.168.56.43:3000`
+* User: `admin`
+* Password: (dari secret `kps-grafana`)
+
+2. Setelah login:
+
+* Klik menu kiri **Dashboards → Browse**
+* Cari folder **Kubernetes / Compute Resources** atau **Node Exporter**
+  * contoh yang enak dilihat:
+    * **Kubernetes / Compute Resources / Namespace (Pods)**
+    * **Kubernetes / Compute Resources / Node (Pods)**
+    * **Node Exporter / Nodes**
+
+3. Kalau kamu mau **URL langsung buka dashboard**:
+
+* Buka dashboard yang kamu mau
+* Copy URL-nya (bookmark)
+* Atau set jadi Home:
+  * Klik avatar (pojok kiri bawah) → **Preferences**
+  * **Home dashboard** → pilih dashboard yang kamu suka → Save\
+    (mulai sekarang buka `http://192.168.56.43:3000/` akan langsung ke dashboard itu)
+
+***
+
+## 11) Cara lihat LOG di Grafana (Loki)
+
+1. Menu kiri → **Explore**
+2. Pilih Data source: **Loki**
+3. Contoh query cepat:
+
+*   Semua log namespace production kamu:
+
+    ```
+    {namespace="threebody-prod"}
+    ```
+*   Log pod laravel:
+
+    ```
+    {namespace="threebody-prod", app="laravel"}
+    ```
+
+Kalau label `app` beda, klik “Label browser” di Explore untuk lihat label yang tersedia.
+
+***
+
+## 12) Perlu “di-save” apa saja? (supaya restart VM aman)
+
+✅ Wajib disimpan:
+
+* File systemd:
+  * `/etc/systemd/system/kpf-grafana.service`
+  * `/etc/systemd/system/kpf-prometheus.service`
+  * `/etc/systemd/system/kpf-loki.service`
+* Values helm (biar bisa re-install identik):
+  *   `/tmp/loki-values-lab.yaml` → pindahkan ke folder permanen, contoh:
+
+      ```bash
+      sudo mkdir -p /opt/runbook/monitoring
+      sudo cp /tmp/loki-values-lab.yaml /opt/runbook/monitoring/
+      sudo cp /tmp/promtail-values.yaml /opt/runbook/monitoring/
+      sudo cp /tmp/kps-datasource-loki.yaml /opt/runbook/monitoring/
+      ```
+
+⚠️ Catatan penting:
+
+* Loki kamu sekarang **tanpa PVC** → log akan **hilang kalau pod restart**. Untuk lab aman, tapi kalau kamu mau “log awet”, nanti kita upgrade pakai storageClass + persistence.
+
+***
+
+### 13) Verifikasi final (sekali jalan)
+
+```bash
+# monitoring pods OK
+kubectl -n monitoring get pods -o wide
+
+# port-forward systemd OK
+systemctl --no-pager status kpf-grafana kpf-prometheus kpf-loki
+ss -lntp | egrep ':3000|:9090|:3100'
+
+# endpoint OK
+curl -fsS http://192.168.56.43:9090/-/ready
 curl -fsS http://192.168.56.43:3100/loki/api/v1/status/buildinfo | head
 ```
 
 ***
 
-## K) Cara “sekali akses URL langsung muncul monitoring”
-
-Ini yang kamu tanya di UI.
-
-Grafana default masuk halaman home, tapi kamu bisa set **Home Dashboard** supaya begitu buka `http://IP:3000` langsung muncul dashboard monitoring.
-
-#### K1) Set Home Dashboard dari UI
-
-1. Grafana → menu kiri **Dashboards**
-2. Pilih dashboard yang kamu mau jadi default (contoh:\
-   **Kubernetes / Compute Resources / Cluster**)
-3. Klik **⭐ Star** (biar gampang dicari)
-4. Klik icon user kanan atas → **Preferences**
-5. Set **Home dashboard** → pilih dashboard yang kamu bintangin
-6. Save
-
-✅ Hasil: buka `http://192.168.56.43:3000/` langsung tampil dashboard itu.
-
-***
-
-## L) Checklist Final (harus hijau semua)
-
-Jalankan:
-
-```bash
-kubectl -n monitoring get pods -o wide | egrep -i 'grafana|prometheus|alertmanager|loki|promtail'
-kubectl -n monitoring get pod loki-0
-kubectl -n monitoring get ds promtail
-ss -lntp | egrep ':3000|:9090|:3100' || true
-curl -fsSI http://192.168.56.43:3000/login | head -n 1
-curl -fsS  http://192.168.56.43:9090/-/ready | head -n 1
-```
-
-***
-
-## M) WAJIB “SAVE” (supaya tidak hilang & tidak ngulang)
-
-Jangan taruh hanya di `/tmp`, pindahkan ke folder permanen:
-
-```bash
-mkdir -p ~/ops/monitoring
-cp /tmp/loki-values-lab.yaml ~/ops/monitoring/
-cp /tmp/promtail-values.yaml ~/ops/monitoring/
-cp /tmp/kps-datasource-loki.yaml ~/ops/monitoring/
-```
-
-Kalau repo git kamu ada, commit file ini.
-
-***
-
-### Sekarang langkah kamu berikutnya (tanpa tanya ulang)
-
-Karena error kamu saat ini **helm belum ada**, lakukan ini dulu:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y helm
-helm version
-```
-
-Kalau `helm version` sudah keluar, lanjutkan ke bagian **C**.
-
-Kalau setelah install helm ada error lain (misal image pull, pod pending, dsb), kirim output step yang error itu, dan aku akan perbaiki sesuai pola kendala yang sudah terjadi sebelumnya.
+Kalau kamu mau, aku bisa rapikan runbook ini jadi **format “sekali copy-paste dari awal”** (dengan blok A–Z dan check/expected output) supaya kamu tinggal ikuti tanpa mikir.
