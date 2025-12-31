@@ -822,6 +822,7 @@ stages:
   - build
   - push
   - deploy
+  - monitoring
 
 workflow:
   rules:
@@ -842,6 +843,10 @@ variables:
   KUBECTL_VERSION: "v1.30.14"
   K8S_ROLLOUT_TIMEOUT: "15m"
   K8S_IMAGEPULL_SECRET: "harbor-regcred"
+
+  # --- Monitoring ---
+  MON_NS: "monitoring"
+  HELM_VERSION: "v3.14.4"
 
 default:
   tags: ["deploy"]
@@ -981,7 +986,6 @@ deploy:
     echo "==> [deploy] update image tag ke commit SHA"
     kubectl -n "$K8S_NS" set image deployment/frontend frontend="$REGISTRY/frontend:$TAG"
     kubectl -n "$K8S_NS" set image deployment/go go="$REGISTRY/go:$TAG"
-    # IMPORTANT: update container laravel + initContainer copy-app biar code yang dicopy selalu versi commit yang sama
     kubectl -n "$K8S_NS" set image deployment/laravel laravel="$REGISTRY/laravel:$TAG" copy-app="$REGISTRY/laravel:$TAG"
 
     echo "==> [deploy] rollout"
@@ -1006,10 +1010,10 @@ deploy:
     | kubectl -n "$K8S_NS" apply -f -
 
     kubectl -n "$K8S_NS" wait --for=condition=complete job/laravel-migrate --timeout=10m || (
-    echo "ERROR: migrate job gagal / timeout"
-    kubectl -n "$K8S_NS" logs job/laravel-migrate --all-containers=true --tail=200 || true
-    kubectl -n "$K8S_NS" describe job laravel-migrate || true
-    exit 1
+      echo "ERROR: migrate job gagal / timeout"
+      kubectl -n "$K8S_NS" logs job/laravel-migrate --all-containers=true --tail=200 || true
+      kubectl -n "$K8S_NS" describe job laravel-migrate || true
+      exit 1
     )
 
     echo "==> [deploy][addon] migrate job log (ringkas)"
@@ -1033,6 +1037,70 @@ deploy:
     kubectl -n "$K8S_NS" get pods -o wide || true
     kubectl -n "$K8S_NS" describe pods || true
     exit 1
+
+monitoring_install:
+  stage: monitoring
+  when: manual
+  needs: ["deploy"]
+  script: |
+    echo "==> [monitoring] validasi variables"
+    : "${KUBECONFIG_PROD:?Missing KUBECONFIG_PROD (GitLab Variables Type: File)}"
+
+    echo "==> [monitoring] siapkan kubectl"
+    mkdir -p .bin
+    if [ ! -x .bin/kubectl ]; then
+      curl -fsSL -o .bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+      chmod +x .bin/kubectl
+    fi
+    export PATH="$PWD/.bin:$PATH"
+    kubectl version --client=true
+
+    echo "==> [monitoring] siapkan helm (binary)"
+    if [ ! -x .bin/helm ]; then
+      curl -fsSLO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+      tar -xzf "helm-${HELM_VERSION}-linux-amd64.tar.gz"
+      install -m 0755 linux-amd64/helm .bin/helm
+    fi
+    helm version
+
+    echo "==> [monitoring] set kubeconfig dari File Variable"
+    export KUBECONFIG="$KUBECONFIG_PROD"
+
+    echo "==> [monitoring] cek cluster"
+    kubectl get nodes -o wide
+
+    echo "==> [monitoring] namespace monitoring"
+    kubectl get ns "$MON_NS" >/dev/null 2>&1 || kubectl create ns "$MON_NS"
+
+    echo "==> [monitoring] add repo"
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm repo add grafana https://grafana.github.io/helm-charts
+    helm repo update
+
+    echo "==> [monitoring] install/upgrade kube-prometheus-stack (+ datasource loki)"
+    helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+      -n "$MON_NS" \
+      -f deploy/monitoring/kps-datasource-loki.yaml \
+      --wait --timeout 20m
+
+    echo "==> [monitoring] install/upgrade loki (lab single binary)"
+    helm upgrade --install loki grafana/loki \
+      -n "$MON_NS" \
+      -f deploy/monitoring/loki-values-lab.yaml \
+      --wait --timeout 20m
+
+    echo "==> [monitoring] install/upgrade promtail"
+    helm upgrade --install promtail grafana/promtail \
+      -n "$MON_NS" \
+      -f deploy/monitoring/promtail-values.yaml \
+      --wait --timeout 20m
+
+    echo "==> [monitoring] ringkasan"
+    kubectl -n "$MON_NS" get pods -o wide
+    kubectl -n "$MON_NS" get svc | egrep -i 'grafana|prometheus|loki|gateway|promtail' || true
+
+    echo "==> [monitoring] NOTE: akses UI pakai systemd port-forward di vm-k8s (runbook C6.9)"
+
 ```
 
 Buat cert:
@@ -1379,6 +1447,415 @@ free -h
 ```
 
 Harus tidak ada `/swap.img` dan Swap total idealnya `0`.
+
+Oke — aku tempatkan **Monitoring + Logging** ini **di bagian VM-K8S** (runbook utama kamu yang per-VM), dan posisinya **SEBELUM tahap “Push pertama (E2)”**. Jadi alurnya:
+
+**A (semua VM) → B (vm-docker) → C (vm-k8s + monitoring) → D (vm-worker) → E (baru push pertama).**
+
+> Catatan penting: monitoring **tidak mempengaruhi push** secara langsung, tapi menaruhnya sebelum push itu aman — yang penting semua langkahnya punya “gate/cek” supaya **nggak ada error**.
+
+Di bawah ini adalah blok **yang bisa kamu tempel langsung** ke runbook utama kamu, di **VM-K8S** setelah cluster + CNI (Calico) siap dan idealnya worker sudah join.
+
+***
+
+## C. VM-K8S (192.168.56.43) — Kubernetes control-plane (+ Monitoring sebelum push pertama)
+
+### C6) Monitoring + Logging (Grafana + Prometheus + Loki + Promtail) — WAJIB SEBELUM PUSH PERTAMA
+
+> Jalankan di **vm-k8s** sebagai user `cikal`.
+
+#### C6.0) Gate awal (harus Ready dulu)
+
+```bash
+kubectl get nodes -o wide
+kubectl get pods -A | head
+```
+
+Target:
+
+* `vm-k8s` **Ready**
+* (kalau `vm-worker` sudah join) `vm-worker` juga **Ready**
+
+Kalau ada NotReady → stop dulu, beresin dulu sampai Ready.
+
+***
+
+#### C6.1) DNS fix untuk Helm repo (wajib, anti “could not resolve host”)
+
+> Ini sama konsepnya dengan A4, tapi kita pastikan di vm-k8s bener-bener OK.
+
+```bash
+sudo tee /etc/systemd/resolved.conf >/dev/null <<'EOF'
+[Resolve]
+DNS=1.1.1.1 8.8.8.8
+FallbackDNS=9.9.9.9 8.8.4.4
+DNSStubListener=yes
+EOF
+
+sudo systemctl restart systemd-resolved
+sudo resolvectl flush-caches
+sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+```
+
+Gate:
+
+```bash
+cat /etc/resolv.conf
+getent hosts github.com || true
+getent hosts get.helm.sh || true
+```
+
+> Catatan: kalau `baltocdn.com` gagal itu **tidak masalah**, runbook ini **tidak pakai baltocdn**.
+
+***
+
+#### C6.2) Install Helm (versi aman: binary dari get.helm.sh)
+
+Kalau dulu kamu pernah install helm via apt repo dan bikin masalah, bersihkan dulu:
+
+```bash
+sudo rm -f /etc/apt/sources.list.d/helm-stable-debian.list
+sudo rm -f /etc/apt/keyrings/helm.gpg
+sudo apt-get update -y
+```
+
+Install helm binary:
+
+```bash
+cd /tmp
+VER="v3.14.4"
+curl -fsSLO "https://get.helm.sh/helm-${VER}-linux-amd64.tar.gz"
+tar -xzf "helm-${VER}-linux-amd64.tar.gz"
+sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+
+helm version
+which helm
+```
+
+Gate target:
+
+* `helm version` keluar (tidak error)
+* `which helm` menunjuk `/usr/local/bin/helm`
+
+***
+
+#### C6.3) Add repo chart (Prometheus stack + Grafana)
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+```
+
+Gate:
+
+```bash
+helm repo list
+```
+
+***
+
+#### C6.4) Buat folder “values permanen” (biar konsisten dan bisa install ulang identik)
+
+```bash
+sudo mkdir -p /opt/runbook/monitoring
+sudo chown -R "$USER:$USER" /opt/runbook/monitoring
+```
+
+***
+
+#### C6.5) Install Monitoring: kube-prometheus-stack (Prometheus + Grafana + Node Exporter + KSM)
+
+Namespace:
+
+```bash
+kubectl get ns monitoring >/dev/null 2>&1 || kubectl create ns monitoring
+```
+
+Install:
+
+```bash
+helm upgrade --install kps prometheus-community/kube-prometheus-stack -n monitoring
+```
+
+Tunggu siap:
+
+```bash
+kubectl -n monitoring get pods -o wide
+```
+
+Ambil password Grafana:
+
+```bash
+kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
+
+Simpan password (opsional, untuk catatan kamu):
+
+```bash
+echo "Grafana admin password: $(kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d)" \
+| tee /opt/runbook/monitoring/grafana-admin-password.txt
+```
+
+***
+
+#### C6.6) Install Loki (lab ringan, anti CrashLoop read-only)
+
+Buat values Loki (ini versi stabil yang kamu pakai):
+
+```bash
+cat > /opt/runbook/monitoring/loki-values-lab.yaml <<'EOF'
+deploymentMode: SingleBinary
+
+test:
+  enabled: false
+
+loki:
+  auth_enabled: false
+  useTestSchema: true
+
+  containerSecurityContext:
+    readOnlyRootFilesystem: false
+
+  commonConfig:
+    replication_factor: 1
+
+  storage:
+    type: filesystem
+    bucketNames:
+      chunks: chunks
+      ruler: ruler
+      admin: admin
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: false
+
+  extraVolumes:
+    - name: loki-data
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: loki-data
+      mountPath: /var/loki
+
+gateway:
+  enabled: true
+
+minio:
+  enabled: false
+
+lokiCanary:
+  enabled: false
+
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
+backend: { replicas: 0 }
+read: { replicas: 0 }
+write: { replicas: 0 }
+EOF
+```
+
+Install:
+
+```bash
+helm upgrade --install loki grafana/loki -n monitoring -f /opt/runbook/monitoring/loki-values-lab.yaml
+```
+
+Gate:
+
+```bash
+kubectl -n monitoring get pod loki-0 -w
+kubectl -n monitoring get svc | egrep -i 'loki|memberlist|gateway'
+```
+
+***
+
+#### C6.7) Install Promtail (kirim log pod ke Loki)
+
+Buat values:
+
+```bash
+cat > /opt/runbook/monitoring/promtail-values.yaml <<'EOF'
+config:
+  clients:
+    - url: http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+EOF
+```
+
+Install:
+
+```bash
+helm upgrade --install promtail grafana/promtail -n monitoring -f /opt/runbook/monitoring/promtail-values.yaml
+```
+
+Gate:
+
+```bash
+kubectl -n monitoring get ds/promtail
+kubectl -n monitoring get pods -o wide | egrep -i promtail
+```
+
+***
+
+#### C6.8) Tambahkan Loki sebagai Data Source Grafana (Helm upgrade kps)
+
+Buat values datasource:
+
+```bash
+cat > /opt/runbook/monitoring/kps-datasource-loki.yaml <<'EOF'
+grafana:
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.monitoring.svc.cluster.local
+      isDefault: false
+      jsonData:
+        maxLines: 1000
+EOF
+```
+
+Apply:
+
+```bash
+helm upgrade kps prometheus-community/kube-prometheus-stack -n monitoring -f /opt/runbook/monitoring/kps-datasource-loki.yaml
+kubectl -n monitoring rollout status deploy/kps-grafana
+```
+
+***
+
+#### C6.9) Akses UI via systemd port-forward (biar restart VM tetap aman)
+
+> Ini yang bikin setelah reboot vm-k8s, UI monitoring bisa balik tanpa kamu port-forward manual.
+
+**Grafana**
+
+```bash
+sudo tee /etc/systemd/system/kpf-grafana.service >/dev/null <<'EOF'
+[Unit]
+Description=Kubernetes Port-Forward Grafana (monitoring)
+After=network-online.target kubelet.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=KUBECONFIG=/etc/kubernetes/admin.conf
+ExecStart=/usr/bin/kubectl -n monitoring port-forward svc/kps-grafana 3000:80 --address 192.168.56.43
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+**Prometheus**
+
+```bash
+sudo tee /etc/systemd/system/kpf-prometheus.service >/dev/null <<'EOF'
+[Unit]
+Description=Kubernetes Port-Forward Prometheus (monitoring)
+After=network-online.target kubelet.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=KUBECONFIG=/etc/kubernetes/admin.conf
+ExecStart=/usr/bin/kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090:9090 --address 192.168.56.43
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+**Loki gateway**
+
+```bash
+sudo tee /etc/systemd/system/kpf-loki.service >/dev/null <<'EOF'
+[Unit]
+Description=Kubernetes Port-Forward Loki Gateway (monitoring)
+After=network-online.target kubelet.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=KUBECONFIG=/etc/kubernetes/admin.conf
+ExecStart=/usr/bin/kubectl -n monitoring port-forward svc/loki-gateway 3100:80 --address 192.168.56.43
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now kpf-grafana kpf-prometheus kpf-loki
+```
+
+Gate:
+
+```bash
+ss -lntp | egrep ':3000|:9090|:3100'
+curl -fsS http://192.168.56.43:3000/login | head -n 1
+curl -fsS http://192.168.56.43:9090/-/ready
+curl -fsS "http://192.168.56.43:3100/loki/api/v1/status/buildinfo" | head
+```
+
+***
+
+#### C6.10) Cara lihat monitoring & log (pemula)
+
+**Grafana UI**
+
+* URL: `http://192.168.56.43:3000`
+* user: `admin`
+* password: dari secret `kps-grafana`
+
+**Dashboard contoh:**
+
+* Dashboards → Browse → cari:
+  * _Node Exporter / Nodes_
+  * _Kubernetes / Compute Resources / Namespace (Pods)_
+
+**Log Loki:**
+
+* Explore → pilih datasource **Loki**
+* query:
+
+```
+{namespace="threebody-prod"}
+```
+
+***
+
+#### C6.11) Catatan penting (biar nggak kaget)
+
+* Loki ini **tanpa PVC** (pakai `emptyDir`) → log bisa hilang kalau pod Loki restart. Untuk lab ini aman & ringan.
+
+***
+
+### ✅ Setelah C6 selesai, baru lanjut ke tahap D (vm-worker) dan E (Push pertama)
+
+Karena kamu minta “push pertama tidak ada error”, setelah monitoring selesai dan sebelum E2, aku sarankan kamu tetap jalankan gate yang sudah ada di runbook kamu:
+
+* **ADD-ON Harbor readiness** (`/v2` harus balas 401)
+* **ADD-ON runner akses docker + resolve harbor**
+* **ADD-ON bootstrap imagePullSecret** (kalau kamu pakai itu)
 
 ***
 
