@@ -124,8 +124,8 @@ getent hosts gitlab.com altssh.gitlab.com registry-1.docker.io || true
 ```bash
 sudo apt-get update -y
 sudo apt-get install -y ca-certificates curl git nano unzip rsync openssl openssh-server
-sudo apt install ufw
-sudo apt install lsof
+sudo apt install ufw -y
+sudo apt install lsof -y
 sudo systemctl enable --now ssh
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
@@ -1660,8 +1660,8 @@ helm repo list
 #### C6.4) Buat folder “values permanen” (biar konsisten dan bisa install ulang identik)
 
 ```bash
-sudo mkdir -p /opt/runbook/monitoring
-sudo chown -R "$USER:$USER" /opt/runbook/monitoring
+sudo mkdir -p /deploy/monitoring
+sudo chown -R "$USER:$USER" /deploy/monitoring
 ```
 
 ***
