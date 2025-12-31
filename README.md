@@ -30,7 +30,7 @@ https://hit.local
 
 **A1) HARDEN semua VM: matikan auto update & cegah restart service otomatis**
 
-> Jalankan di **SEMUA VM**: `vm-docker`, `vm-harbor`, `vm-k8s`, `vm-worker`
+> Jalankan di **SEMUA VM**: `vm-docker`, `vm-k8s`, `vm-worker`
 
 ```bash
 sudo systemctl stop unattended-upgrades 2>/dev/null || true
@@ -127,13 +127,12 @@ sudo apt-get install -y ca-certificates curl git nano unzip rsync openssl openss
 sudo apt install ufw
 sudo apt install lsof
 sudo systemctl enable --now ssh
-sudo ufw enable
-echo "=== [Firewall] pastikan port 8080 tidak diblok ==="
-sudo ufw status verbose || true
-# kalau UFW aktif, BUKA port 8080:
-sudo ufw allow 8080/tcp || true
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 8080/tcp
 sudo ufw allow ssh
-sudo ufw reload || true
+sudo ufw reload
+sudo ufw status verbose
 
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"
@@ -261,6 +260,12 @@ server {
 
   ssl_certificate     /etc/nginx/certs/tls.crt;
   ssl_certificate_key /etc/nginx/certs/tls.key;
+  
+  # common proxy headers (berlaku untuk semua location yang proxy_pass)
+  proxy_set_header Host              $host;
+  proxy_set_header X-Real-IP         $remote_addr;
+  proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
 
   # frontend
   location / {
@@ -2218,8 +2223,6 @@ Kalau ini lolos, job push akan aman.
 
 ***
 
-***
-
 #### ✅ ADD-ON 3
 
 > Tujuan: bikin “gate” terakhir supaya kamu **tidak push** kalau Harbor belum siap (biar pipeline pertama tidak gagal lagi).
@@ -2278,24 +2281,6 @@ kubectl -n "$NS" get sa default -o jsonpath='{.imagePullSecrets[*].name}'; echo
 > Kalau kamu nanti pakai username/password Harbor dari GitLab Variables (bukan hardcode), kamu bisa jalankan bootstrap ini setelah kamu yakin kredensial Harbor benar. Tapi untuk runbook “sekali push lab”, ini yang paling stabil.
 
 ***
-
-**✅ ADD-ON LARAVEL READY (wajib)**
-
-```bash
-# =========================================================
-# ADD-ON: FIX LARAVEL APACHE DOCROOT (WAJIB sebelum push pertama)
-# Lokasi: vm-docker, setelah repo siap, sebelum git push pertama
-# =========================================================
-cd ~/three-body-problem
-
-echo "=== cek Dockerfile Laravel sudah set APACHE_DOCUMENT_ROOT ke /public ==="
-grep -n "APACHE_DOCUMENT_ROOT" -n laravel/Dockerfile || true
-grep -n "laravel.conf" -n laravel/Dockerfile || true
-
-echo "Jika belum ada APACHE_DOCUMENT_ROOT=/var/www/html/public, lakukan FULL REPLACE laravel/Dockerfile sesuai runbook."
-```
-
-Pastikan kamu di root repo saat cek file (biar nggak kejadian salah path lagi):
 
 **✅ ADD-ON LARAVEL SMOKE TEST (wajib)**
 
