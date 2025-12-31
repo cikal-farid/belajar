@@ -231,6 +231,7 @@ Buat folder deploy
 ```bash
 mkdir -p ~/three-body-problem/deploy/edge/nginx/conf.d
 mkdir -p ~/three-body-problem/deploy/k8s
+mkdir -p deploy/k8s/base deploy/k8s/jobs
 ```
 
 #### Setup Konfigurasi
@@ -1102,6 +1103,102 @@ monitoring_install:
     echo "==> [monitoring] NOTE: akses UI pakai systemd port-forward di vm-k8s (runbook C6.9)"
 
 ```
+
+#### ✅ ADD-ON: Buat file monitoring di repo (WAJIB untuk job `monitoring_install`)
+
+```bash
+cd ~/three-body-problem
+mkdir -p deploy/monitoring
+
+# 1) Loki values
+cat > deploy/monitoring/loki-values-lab.yaml <<'EOF'
+deploymentMode: SingleBinary
+
+test:
+  enabled: false
+
+loki:
+  auth_enabled: false
+  useTestSchema: true
+
+  containerSecurityContext:
+    readOnlyRootFilesystem: false
+
+  commonConfig:
+    replication_factor: 1
+
+  storage:
+    type: filesystem
+    bucketNames:
+      chunks: chunks
+      ruler: ruler
+      admin: admin
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: false
+
+  extraVolumes:
+    - name: loki-data
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: loki-data
+      mountPath: /var/loki
+
+gateway:
+  enabled: true
+
+minio:
+  enabled: false
+
+lokiCanary:
+  enabled: false
+
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
+backend: { replicas: 0 }
+read: { replicas: 0 }
+write: { replicas: 0 }
+EOF
+
+# 2) Promtail values
+cat > deploy/monitoring/promtail-values.yaml <<'EOF'
+config:
+  clients:
+    - url: http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+EOF
+
+# 3) KPS datasource Loki
+cat > deploy/monitoring/kps-datasource-loki.yaml <<'EOF'
+grafana:
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.monitoring.svc.cluster.local
+      isDefault: false
+      jsonData:
+        maxLines: 1000
+EOF
+
+echo "=== CEK file monitoring ==="
+ls -lah deploy/monitoring
+```
+
+Target: 3 file itu ada.
 
 Buat cert:
 
