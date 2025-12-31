@@ -1582,6 +1582,8 @@ Kalau ada NotReady → stop dulu, beresin dulu sampai Ready.
 
 ***
 
+#### Jika ingin test install manual untuk tahapan monitoringnya lakukan hal dibawah ini
+
 #### C6.1) DNS fix untuk Helm repo (wajib, anti “could not resolve host”)
 
 > Ini sama konsepnya dengan A4, tapi kita pastikan di vm-k8s bener-bener OK.
@@ -1706,7 +1708,7 @@ echo "Grafana admin password: $(kubectl -n monitoring get secret kps-grafana -o 
 Buat values Loki (ini versi stabil yang kamu pakai):
 
 ```bash
-cat > /opt/runbook/monitoring/loki-values-lab.yaml <<'EOF'
+cat > /deploy/monitoring/loki-values-lab.yaml <<'EOF'
 deploymentMode: SingleBinary
 
 test:
@@ -1765,7 +1767,7 @@ EOF
 Install:
 
 ```bash
-helm upgrade --install loki grafana/loki -n monitoring -f /opt/runbook/monitoring/loki-values-lab.yaml
+helm upgrade --install loki grafana/loki -n monitoring -f /deploy/monitoring/loki-values-lab.yaml
 ```
 
 Gate:
@@ -1782,7 +1784,7 @@ kubectl -n monitoring get svc | egrep -i 'loki|memberlist|gateway'
 Buat values:
 
 ```bash
-cat > /opt/runbook/monitoring/promtail-values.yaml <<'EOF'
+cat > /deploy/monitoring/promtail-values.yaml <<'EOF'
 config:
   clients:
     - url: http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push
@@ -1800,7 +1802,7 @@ EOF
 Install:
 
 ```bash
-helm upgrade --install promtail grafana/promtail -n monitoring -f /opt/runbook/monitoring/promtail-values.yaml
+helm upgrade --install promtail grafana/promtail -n monitoring -f /deploy/monitoring/promtail-values.yaml
 ```
 
 Gate:
@@ -1817,7 +1819,7 @@ kubectl -n monitoring get pods -o wide | egrep -i promtail
 Buat values datasource:
 
 ```bash
-cat > /opt/runbook/monitoring/kps-datasource-loki.yaml <<'EOF'
+cat > /deploy/monitoring/kps-datasource-loki.yaml <<'EOF'
 grafana:
   additionalDataSources:
     - name: Loki
