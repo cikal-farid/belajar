@@ -134,8 +134,21 @@ sudo ufw allow ssh
 sudo ufw reload
 sudo ufw status verbose
 
-curl -fsSL https://get.docker.com | sudo sh
+# bersihin sisa attempt docker-ce (kalau ada)
+sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin docker-ce-rootless-extras docker-model-plugin || true
+sudo rm -f /etc/apt/sources.list.d/docker.list
+sudo rm -f /etc/apt/keyrings/docker.asc
+
+sudo apt-get update
+sudo apt-get install -y docker.io docker-compose-v2 docker-buildx
+
+sudo systemctl enable --now docker
+
+# pastikan group docker ada + masukkan user kamu
+sudo groupadd -f docker
 sudo usermod -aG docker "$USER"
+
+# apply group untuk shell saat ini (atau logout/login)
 newgrp docker
 
 docker version
