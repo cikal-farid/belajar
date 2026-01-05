@@ -286,7 +286,7 @@ server {
 Buat file docker-compose.yml
 
 ```bash
-nano deploy/edge/docker-compose.edge.yml
+nano deploy/edge/docker-compose.yml
 ```
 
 Isi file diatas dengan konfig dibawah ini
