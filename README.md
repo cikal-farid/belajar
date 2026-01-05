@@ -1007,19 +1007,6 @@ echo "=== CEK file monitoring ==="
 ls -lah deploy/monitoring
 ```
 
-Buat file /frontend/.env.development
-
-```bash
-nano ~/three-body-problem/frontend/.env.development
-```
-
-Isi file diatas dengan konfig dibawah ini
-
-```bash
-REACT_APP_GO_API_BASE=http://localhost:8080
-REACT_APP_LARAVEL_API_BASE=http://localhost:8001
-```
-
 Buat file frontend/.env.production
 
 ```bash
@@ -1095,7 +1082,7 @@ nano ~/three-body-problem/frontend/Dockerfile
 Isi file diatas dengan konfig dibawah ini
 
 ```bash
-FROM node:18-alpine as build
+FROM node:18-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
