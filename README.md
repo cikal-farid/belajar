@@ -127,28 +127,18 @@ sudo apt-get install -y ca-certificates curl git nano unzip rsync openssl openss
 sudo apt install ufw -y
 sudo apt install lsof -y
 sudo systemctl enable --now ssh
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 8080/tcp
+sudo ufw enable
+echo "=== [Firewall] pastikan port 8080 tidak diblok ==="
+sudo ufw status verbose || true
+# kalau UFW aktif, BUKA port 8080:
+sudo ufw allow 8080/tcp || true
 sudo ufw allow ssh
-sudo ufw reload
-sudo ufw status verbose
+sudo ufw allow OpenSSH
+sudo ufw allow 22/tcp
+sudo ufw reload || true
 
-# bersihin sisa attempt docker-ce (kalau ada)
-sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin docker-ce-rootless-extras docker-model-plugin || true
-sudo rm -f /etc/apt/sources.list.d/docker.list
-sudo rm -f /etc/apt/keyrings/docker.asc
-
-sudo apt-get update
-sudo apt-get install -y docker.io docker-compose-v2 docker-buildx
-
-sudo systemctl enable --now docker
-
-# pastikan group docker ada + masukkan user kamu
-sudo groupadd -f docker
+curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"
-
-# apply group untuk shell saat ini (atau logout/login)
 newgrp docker
 
 docker version
@@ -273,12 +263,6 @@ server {
 
   ssl_certificate     /etc/nginx/certs/tls.crt;
   ssl_certificate_key /etc/nginx/certs/tls.key;
-  
-  # common proxy headers (berlaku untuk semua location yang proxy_pass)
-  proxy_set_header Host              $host;
-  proxy_set_header X-Real-IP         $remote_addr;
-  proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-  proxy_set_header X-Forwarded-Proto $scheme;
 
   # frontend
   location / {
@@ -302,7 +286,7 @@ server {
 Buat file docker-compose.yml
 
 ```bash
-nano deploy/edge/docker-compose.yml
+nano deploy/edge/docker-compose.edge.yml
 ```
 
 isi file diatas dengan konfig dibawah ini
@@ -420,6 +404,23 @@ spec:
         app: mysql
     spec:
       terminationGracePeriodSeconds: 30
+
+      # hostPath DirectoryOrCreate biasanya dibuat root:root.
+      # MySQL official image berjalan sebagai uid 999, jadi perlu fix permission.
+      initContainers:
+        - name: fix-perms
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "[fix-perms] ensure mysql datadir perms"
+              chown -R 999:999 /var/lib/mysql || true
+              chmod 700 /var/lib/mysql || true
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
       containers:
         - name: mysql
           image: mysql:8.0
@@ -496,7 +497,9 @@ metadata:
   name: go
   namespace: threebody-prod
 spec:
-  replicas: 1
+  progressDeadlineSeconds: 1800
+
+  replicas: 0
   selector:
     matchLabels:
       app: go
@@ -505,8 +508,6 @@ spec:
       labels:
         app: go
     spec:
-      imagePullSecrets:
-        - name: harbor-regcred
       containers:
         - name: go
           image: harbor.local:8080/threebody/go:latest
@@ -534,6 +535,7 @@ spec:
                 secretKeyRef:
                   name: app-secrets
                   key: MYSQL_PASSWORD
+
 ```
 
 Buat file 30-laravel.yaml
@@ -594,7 +596,9 @@ metadata:
   name: laravel
   namespace: threebody-prod
 spec:
-  replicas: 1
+  progressDeadlineSeconds: 1800
+
+  replicas: 0
   selector:
     matchLabels:
       app: laravel
@@ -603,8 +607,6 @@ spec:
       labels:
         app: laravel
     spec:
-      imagePullSecrets:
-        - name: harbor-regcred
 
       volumes:
         - name: app-shared
@@ -716,6 +718,8 @@ metadata:
   name: frontend
   namespace: threebody-prod
 spec:
+  progressDeadlineSeconds: 1800
+
   replicas: 1
   selector:
     matchLabels:
@@ -725,8 +729,6 @@ spec:
       labels:
         app: frontend
     spec:
-      imagePullSecrets:
-        - name: harbor-regcred
       containers:
         - name: frontend
           image: harbor.local:8080/threebody/frontend:latest
@@ -751,7 +753,8 @@ metadata:
     app: laravel-migrate
 spec:
   ttlSecondsAfterFinished: 600
-  backoffLimit: 3
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
   template:
     metadata:
       labels:
@@ -762,13 +765,30 @@ spec:
 
       initContainers:
         - name: wait-mysql
-          image: busybox:1.36
+          image: mysql:8.0
           command: ["sh", "-c"]
           args:
             - |
-              echo "[wait-mysql] waiting mysql:3306 ..."
-              until nc -z mysql 3306; do sleep 2; done
+              set -eu
+              echo "[wait-mysql] waiting mysql ready (SELECT 1) ..."
+              until mysql -h "$DB_HOST" -P 3306 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -e "SELECT 1" >/dev/null 2>&1; do
+                sleep 2
+              done
               echo "[wait-mysql] mysql ready"
+          env:
+            # lebih stabil daripada "mysql" headless: langsung ke pod statefulset
+            - name: DB_HOST
+              value: mysql-0.mysql
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: MYSQL_PASSWORD
 
       containers:
         - name: migrate
@@ -780,8 +800,19 @@ spec:
               set -eu
               cd /var/www/html
 
+              echo "==> clear laravel caches (anti config-cache nyangkut)"
+              rm -f bootstrap/cache/config.php bootstrap/cache/routes.php bootstrap/cache/services.php 2>/dev/null || true
+              php artisan config:clear || true
+              php artisan cache:clear || true
+              php artisan route:clear || true
+              [ -d resources/views ] && php artisan view:clear || true
+
               echo "==> migrate"
-              php artisan migrate --force
+              php artisan migrate --force || (
+                echo "WARNING: migrate failed; show status"
+                php artisan migrate:status || true
+                exit 1
+              )
 
               echo "==> seed only if products empty"
               php -r '
@@ -789,9 +820,11 @@ spec:
                 $host=getenv("DB_HOST"); $port=getenv("DB_PORT");
                 $db=getenv("DB_DATABASE"); $user=getenv("DB_USERNAME"); $pass=getenv("DB_PASSWORD");
                 $pdo=new PDO("mysql:host=$host;port=$port;dbname=$db;charset=utf8mb4",$user,$pass,[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
-                $count=(int)$pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
-                exit($count===0 ? 0 : 2);
-              } catch (Throwable $e) { exit(0); }
+                try {
+                  $count=(int)$pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
+                  exit($count===0 ? 0 : 2);
+                } catch (Throwable $e) { exit(0); } // kalau products belum ada, seed boleh jalan
+              } catch (Throwable $e) { exit(2); }
               ' && php artisan db:seed --force || true
 
               echo "==> done"
@@ -808,7 +841,7 @@ spec:
             - name: DB_CONNECTION
               value: mysql
             - name: DB_HOST
-              value: mysql
+              value: mysql-0.mysql
             - name: DB_PORT
               value: "3306"
             - name: DB_DATABASE
@@ -826,300 +859,6 @@ spec:
                 secretKeyRef:
                   name: app-secrets
                   key: MYSQL_PASSWORD
-```
-
-Buat file .gitlab-ci.yml didalam projectnya (three-body-problem)
-
-```bash
-nano .gitlab-ci.yml
-```
-
-isi file diatas dengan konfig dibawah ini
-
-```bash
-stages:
-  - build
-  - push
-  - deploy
-  - monitoring
-
-workflow:
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-    - when: never
-
-variables:
-  DOCKER_BUILDKIT: "1"
-  TAG: "$CI_COMMIT_SHORT_SHA"
-
-  # Harbor HTTP (insecure) di vm-docker
-  # IMPORTANT: docker daemon runner WAJIB sudah allow insecure registry harbor.local:8080
-  HARBOR_HOST: "harbor.local:8080"
-  HARBOR_PROJECT: "threebody"
-  REGISTRY: "$HARBOR_HOST/$HARBOR_PROJECT"
-
-  K8S_NS: "threebody-prod"
-  KUBECTL_VERSION: "v1.30.14"
-  K8S_ROLLOUT_TIMEOUT: "15m"
-  K8S_IMAGEPULL_SECRET: "harbor-regcred"
-
-  # --- Monitoring ---
-  MON_NS: "monitoring"
-  HELM_VERSION: "v3.14.4"
-
-default:
-  tags: ["deploy"]
-  before_script:
-    - set -euo pipefail
-
-build_check:
-  stage: build
-  script: |
-    echo "==> [build] build-check images (tanpa push)"
-
-    docker build \
-      --build-arg REACT_APP_GO_API_BASE=/go \
-      --build-arg REACT_APP_LARAVEL_API_BASE=/laravel \
-      -t "$REGISTRY/frontend:$TAG" \
-      -f frontend/Dockerfile frontend
-
-    docker build -t "$REGISTRY/go:$TAG" -f go/Dockerfile go
-    docker build -t "$REGISTRY/laravel:$TAG" -f laravel/Dockerfile laravel
-
-push_images:
-  stage: push
-  needs: ["build_check"]
-  script: |
-    echo "==> [push] sanity check harbor registry"
-    (curl -fsSI "http://$HARBOR_HOST/v2/" | head -n 1) || true
-
-    echo "==> [push] login Harbor (HTTP insecure lab)"
-    : "${HARBOR_USERNAME:?Missing HARBOR_USERNAME}"
-    : "${HARBOR_PASSWORD:?Missing HARBOR_PASSWORD}"
-    echo "$HARBOR_PASSWORD" | docker login "$HARBOR_HOST" -u "$HARBOR_USERNAME" --password-stdin
-
-    echo "==> [push] build+push images (TAG=$TAG)"
-    docker build \
-      --build-arg REACT_APP_GO_API_BASE=/go \
-      --build-arg REACT_APP_LARAVEL_API_BASE=/laravel \
-      -t "$REGISTRY/frontend:$TAG" \
-      -f frontend/Dockerfile frontend
-    docker push "$REGISTRY/frontend:$TAG"
-
-    docker build -t "$REGISTRY/go:$TAG" -f go/Dockerfile go
-    docker push "$REGISTRY/go:$TAG"
-
-    docker build -t "$REGISTRY/laravel:$TAG" -f laravel/Dockerfile laravel
-    docker push "$REGISTRY/laravel:$TAG"
-
-    echo "==> [push] tag+push :latest"
-    docker tag "$REGISTRY/frontend:$TAG" "$REGISTRY/frontend:latest"
-    docker tag "$REGISTRY/go:$TAG" "$REGISTRY/go:latest"
-    docker tag "$REGISTRY/laravel:$TAG" "$REGISTRY/laravel:latest"
-
-    docker push "$REGISTRY/frontend:latest"
-    docker push "$REGISTRY/go:latest"
-    docker push "$REGISTRY/laravel:latest"
-
-deploy:
-  stage: deploy
-  needs: ["push_images"]
-  script: |
-    echo "==> [deploy] validasi variables"
-    : "${KUBECONFIG_PROD:?Missing KUBECONFIG_PROD (GitLab Variables Type: File)}"
-    : "${HARBOR_USERNAME:?Missing HARBOR_USERNAME}"
-    : "${HARBOR_PASSWORD:?Missing HARBOR_PASSWORD}"
-    : "${MYSQL_ROOT_PASSWORD:?Missing MYSQL_ROOT_PASSWORD}"
-    : "${MYSQL_DATABASE:?Missing MYSQL_DATABASE}"
-    : "${MYSQL_USER:?Missing MYSQL_USER}"
-    : "${MYSQL_PASSWORD:?Missing MYSQL_PASSWORD}"
-    : "${LARAVEL_APP_KEY:?Missing LARAVEL_APP_KEY}"
-
-    echo "==> [deploy] siapkan kubectl"
-    mkdir -p .bin
-    if [ ! -x .bin/kubectl ]; then
-      curl -fsSL -o .bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-      chmod +x .bin/kubectl
-    fi
-    export PATH="$PWD/.bin:$PATH"
-    kubectl version --client=true
-
-    echo "==> [deploy] set kubeconfig dari File Variable"
-    export KUBECONFIG="$KUBECONFIG_PROD"
-
-    echo "==> [deploy] cek cluster"
-    kubectl get nodes -o wide
-
-    echo "==> [deploy] pastikan namespace"
-    kubectl get ns "$K8S_NS" >/dev/null 2>&1 || kubectl create ns "$K8S_NS"
-
-    echo "==> [deploy][addon] tunggu default serviceaccount ready (anti race)"
-    for i in $(seq 1 60); do
-      kubectl -n "$K8S_NS" get sa default >/dev/null 2>&1 && break
-      sleep 1
-    done
-    kubectl -n "$K8S_NS" get sa default >/dev/null 2>&1 || (
-      echo "ERROR: serviceaccount default tidak ada"
-      kubectl -n "$K8S_NS" get sa || true
-      exit 1
-    )
-
-    echo "==> [deploy] create/update app-secrets"
-    kubectl -n "$K8S_NS" create secret generic app-secrets \
-      --from-literal=MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
-      --from-literal=MYSQL_DATABASE="$MYSQL_DATABASE" \
-      --from-literal=MYSQL_USER="$MYSQL_USER" \
-      --from-literal=MYSQL_PASSWORD="$MYSQL_PASSWORD" \
-      --from-literal=LARAVEL_APP_KEY="$LARAVEL_APP_KEY" \
-      --dry-run=client -o yaml | kubectl apply -f -
-
-    echo "==> [deploy] create/update imagePullSecret Harbor"
-    kubectl -n "$K8S_NS" create secret docker-registry "$K8S_IMAGEPULL_SECRET" \
-      --docker-server="$HARBOR_HOST" \
-      --docker-username="$HARBOR_USERNAME" \
-      --docker-password="$HARBOR_PASSWORD" \
-      --dry-run=client -o yaml | kubectl apply -f -
-
-    echo "==> [deploy][addon] pastikan secret imagePull ada"
-    kubectl -n "$K8S_NS" get secret "$K8S_IMAGEPULL_SECRET" >/dev/null 2>&1 || (
-      echo "ERROR: secret $K8S_IMAGEPULL_SECRET tidak ada"
-      kubectl -n "$K8S_NS" get secret || true
-      exit 1
-    )
-
-    echo "==> [deploy] attach imagePullSecret ke default serviceaccount (tidak boleh silent)"
-    kubectl -n "$K8S_NS" patch serviceaccount default \
-      -p "{\"imagePullSecrets\": [{\"name\": \"$K8S_IMAGEPULL_SECRET\"}]}" >/dev/null
-
-    echo "==> [deploy][addon] verifikasi SA default"
-    kubectl -n "$K8S_NS" get sa default -o jsonpath='{.imagePullSecrets[*].name}'; echo
-    kubectl -n "$K8S_NS" get sa default -o jsonpath='{.imagePullSecrets[*].name}' | grep -wq "$K8S_IMAGEPULL_SECRET" || (
-      echo "ERROR: imagePullSecret belum nempel ke SA default"
-      kubectl -n "$K8S_NS" get sa default -o yaml || true
-      exit 1
-    )
-
-    echo "==> [deploy] apply manifests"
-    kubectl apply -f deploy/k8s/base/
-
-    echo "==> [deploy] update image tag ke commit SHA"
-    kubectl -n "$K8S_NS" set image deployment/frontend frontend="$REGISTRY/frontend:$TAG"
-    kubectl -n "$K8S_NS" set image deployment/go go="$REGISTRY/go:$TAG"
-    kubectl -n "$K8S_NS" set image deployment/laravel laravel="$REGISTRY/laravel:$TAG" copy-app="$REGISTRY/laravel:$TAG"
-
-    echo "==> [deploy] rollout"
-    kubectl -n "$K8S_NS" rollout status deployment/frontend --timeout="$K8S_ROLLOUT_TIMEOUT" || (
-      echo "---- DEBUG (frontend rollout gagal) ----"
-      kubectl -n "$K8S_NS" get pods -o wide || true
-      kubectl -n "$K8S_NS" get events --sort-by=.lastTimestamp | tail -n 120 || true
-      kubectl -n "$K8S_NS" describe deploy frontend || true
-      kubectl -n "$K8S_NS" describe pod -l app=frontend || true
-      exit 1
-    )
-    kubectl -n "$K8S_NS" rollout status deployment/go --timeout="$K8S_ROLLOUT_TIMEOUT"
-    kubectl -n "$K8S_NS" rollout status deployment/laravel --timeout="$K8S_ROLLOUT_TIMEOUT"
-    kubectl -n "$K8S_NS" rollout status statefulset/mysql --timeout="$K8S_ROLLOUT_TIMEOUT" || true
-
-    echo "==> [deploy][addon] jalankan migrate job (anti push pertama error)"
-    JOB_FILE="deploy/k8s/jobs/laravel-migrate-job.yaml"
-
-    kubectl -n "$K8S_NS" delete job laravel-migrate --ignore-not-found=true
-
-    sed "s|__LARAVEL_IMAGE__|$REGISTRY/laravel:$TAG|g" "$JOB_FILE" \
-    | kubectl -n "$K8S_NS" apply -f -
-
-    kubectl -n "$K8S_NS" wait --for=condition=complete job/laravel-migrate --timeout=10m || (
-      echo "ERROR: migrate job gagal / timeout"
-      kubectl -n "$K8S_NS" logs job/laravel-migrate --all-containers=true --tail=200 || true
-      kubectl -n "$K8S_NS" describe job laravel-migrate || true
-      exit 1
-    )
-
-    echo "==> [deploy][addon] migrate job log (ringkas)"
-    kubectl -n "$K8S_NS" logs job/laravel-migrate --all-containers=true --tail=200 || true
-
-    echo "==> [deploy] ringkasan"
-    kubectl -n "$K8S_NS" get deploy -o wide
-    kubectl -n "$K8S_NS" get svc -o wide
-    kubectl -n "$K8S_NS" get pods -o wide
-
-    echo "==> [deploy] healthcheck via edge nginx (hit.local di vm-docker)"
-    for i in $(seq 1 60); do
-      if curl -kfsS --resolve hit.local:443:127.0.0.1 https://hit.local/ >/dev/null 2>&1; then
-        echo "OK: hit.local sehat"
-        exit 0
-      fi
-      sleep 2
-    done
-
-    echo "ERROR: hit.local healthcheck gagal"
-    kubectl -n "$K8S_NS" get pods -o wide || true
-    kubectl -n "$K8S_NS" describe pods || true
-    exit 1
-
-monitoring_install:
-  stage: monitoring
-  when: manual
-  needs: ["deploy"]
-  script: |
-    echo "==> [monitoring] validasi variables"
-    : "${KUBECONFIG_PROD:?Missing KUBECONFIG_PROD (GitLab Variables Type: File)}"
-
-    echo "==> [monitoring] siapkan kubectl"
-    mkdir -p .bin
-    if [ ! -x .bin/kubectl ]; then
-      curl -fsSL -o .bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-      chmod +x .bin/kubectl
-    fi
-    export PATH="$PWD/.bin:$PATH"
-    kubectl version --client=true
-
-    echo "==> [monitoring] siapkan helm (binary)"
-    if [ ! -x .bin/helm ]; then
-      curl -fsSLO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
-      tar -xzf "helm-${HELM_VERSION}-linux-amd64.tar.gz"
-      install -m 0755 linux-amd64/helm .bin/helm
-    fi
-    helm version
-
-    echo "==> [monitoring] set kubeconfig dari File Variable"
-    export KUBECONFIG="$KUBECONFIG_PROD"
-
-    echo "==> [monitoring] cek cluster"
-    kubectl get nodes -o wide
-
-    echo "==> [monitoring] namespace monitoring"
-    kubectl get ns "$MON_NS" >/dev/null 2>&1 || kubectl create ns "$MON_NS"
-
-    echo "==> [monitoring] add repo"
-    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    helm repo add grafana https://grafana.github.io/helm-charts
-    helm repo update
-
-    echo "==> [monitoring] install/upgrade kube-prometheus-stack (+ datasource loki)"
-    helm upgrade --install kps prometheus-community/kube-prometheus-stack \
-      -n "$MON_NS" \
-      -f deploy/monitoring/kps-datasource-loki.yaml \
-      --wait --timeout 20m
-
-    echo "==> [monitoring] install/upgrade loki (lab single binary)"
-    helm upgrade --install loki grafana/loki \
-      -n "$MON_NS" \
-      -f deploy/monitoring/loki-values-lab.yaml \
-      --wait --timeout 20m
-
-    echo "==> [monitoring] install/upgrade promtail"
-    helm upgrade --install promtail grafana/promtail \
-      -n "$MON_NS" \
-      -f deploy/monitoring/promtail-values.yaml \
-      --wait --timeout 20m
-
-    echo "==> [monitoring] ringkasan"
-    kubectl -n "$MON_NS" get pods -o wide
-    kubectl -n "$MON_NS" get svc | egrep -i 'grafana|prometheus|loki|gateway|promtail' || true
-
-    echo "==> [monitoring] NOTE: akses UI pakai systemd port-forward di vm-k8s (runbook C6.9)"
-
 ```
 
 #### ✅ ADD-ON: Buat file monitoring di repo (WAJIB untuk job `monitoring_install`)
@@ -1212,11 +951,622 @@ grafana:
         maxLines: 1000
 EOF
 
+# 3) KPS datasource Loki
+cat > deploy/monitoring/expose-ui-nodeport.yaml <<'EOF'
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-nodeport
+  namespace: monitoring
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: kps
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      nodePort: 30030
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-nodeport
+  namespace: monitoring
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: kps
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      nodePort: 30090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki-gateway-nodeport
+  namespace: monitoring
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/component: gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30100
+
+
 echo "=== CEK file monitoring ==="
 ls -lah deploy/monitoring
 ```
 
-Target: 3 file itu ada.
+Buat file /frontend/.env.development
+
+```bash
+nano ~/three-body-problem/frontend/.env.development
+```
+
+```bash
+REACT_APP_GO_API_BASE=http://localhost:8080
+REACT_APP_LARAVEL_API_BASE=http://localhost:8001
+```
+
+Buat file frontend/.env.production
+
+```bash
+nano ~/three-body-problem/frontend/.env.production
+```
+
+```bash
+REACT_APP_GO_API_BASE=/go
+REACT_APP_LARAVEL_API_BASE=/laravel
+```
+
+Buat file frontend/.dockerignore
+
+```bash
+nano ~/three-body-problem/frontend/.dockerignore
+```
+
+```bash
+node_modules
+build
+npm-debug.log
+.DS_Store
+```
+
+Buat file go/.dockerignore
+
+```bash
+nano ~/three-body-problem/go/.dockerignore
+```
+
+```bash
+bin
+vendor
+*.log
+.DS_Store
+tmp
+**/*.test
+```
+
+Buat file laravel/.dockerignore
+
+```bash
+nano ~/three-body-problem/laravel/.dockerignore
+```
+
+```bash
+/vendor
+/node_modules
+/storage/*.key
+/storage/logs
+/storage/framework/cache
+/storage/framework/sessions
+/storage/framework/views
+bootstrap/cache
+.env
+.DS_Store
+```
+
+Buat file frontend/Dockerfile
+
+```bash
+nano ~/three-body-problem/frontend/Dockerfile
+```
+
+```bash
+FROM node:18-alpine as build
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=build /app/build /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+Buat file go/Dockerfile
+
+```bash
+nano ~/three-body-problem/go/Dockerfile
+```
+
+```bash
+FROM golang:1.21-alpine as build
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o server .
+
+FROM alpine:3.18
+WORKDIR /app
+COPY --from=build /app/server /app/server
+EXPOSE 8080
+CMD ["/app/server"]
+```
+
+Buat file laravel/Dockerfile
+
+```bash
+nano ~/three-body-problem/laravel/Dockerfile
+```
+
+```bash
+FROM php:8.2-fpm
+
+RUN apt-get update && apt-get install -y \
+    git curl libpng-dev libonig-dev libxml2-dev zip unzip \
+ && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
+
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www
+COPY . /var/www
+
+RUN composer install --no-interaction --prefer-dist --optimize-autoloader
+
+RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
+
+EXPOSE 9000
+CMD ["php-fpm"]
+```
+
+Buat file .gitignore
+
+```bash
+nano ~/three-body-problem/.gitignore
+```
+
+```bash
+# CI helper binaries
+.bin/
+
+# Node / React
+**/node_modules/
+
+# PHP / Laravel
+**/vendor/
+.env
+
+# Logs / temp
+*.log
+*.tmp
+.DS_Store
+
+# Edge TLS (generated locally)
+deploy/edge/certs/tls.*
+```
+
+Buat file .gitlab-ci.yml didalam projectnya (three-body-problem)
+
+```bash
+nano ~/three-body-problem/.gitlab-ci.yml
+```
+
+isi file diatas dengan konfig dibawah ini
+
+```bash
+stages:
+  - build
+  - push
+  - deploy
+  - monitoring
+
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - when: never
+
+variables:
+  DOCKER_BUILDKIT: "1"
+  TAG: "$CI_COMMIT_SHORT_SHA"
+
+  # Harbor HTTP (insecure) di vm-docker
+  # IMPORTANT: docker daemon runner WAJIB sudah allow insecure registry harbor.local:8080
+  HARBOR_HOST: "harbor.local:8080"
+  HARBOR_PROJECT: "threebody"
+  REGISTRY: "$HARBOR_HOST/$HARBOR_PROJECT"
+
+  K8S_NS: "threebody-prod"
+  KUBECTL_VERSION: "v1.30.14"
+  K8S_ROLLOUT_TIMEOUT: "30m"
+
+  # --- Monitoring ---
+  MON_NS: "monitoring"
+  HELM_VERSION: "v3.14.4"
+
+default:
+  tags: ["deploy"]
+  before_script:
+    - set -euo pipefail
+
+build_check:
+  stage: build
+  script: |
+    echo "==> [build] build-check images (tanpa push)"
+
+    docker build \
+      --build-arg REACT_APP_GO_API_BASE=/go \
+      --build-arg REACT_APP_LARAVEL_API_BASE=/laravel \
+      -t "$REGISTRY/frontend:$TAG" \
+      -f frontend/Dockerfile frontend
+
+    docker build -t "$REGISTRY/go:$TAG" -f go/Dockerfile go
+    docker build -t "$REGISTRY/laravel:$TAG" -f laravel/Dockerfile laravel
+
+push_images:
+  stage: push
+  needs: ["build_check"]
+  script: |
+    set -euo pipefail
+    echo "==> [push] sanity check harbor registry"
+    (curl -fsSI "http://$HARBOR_HOST/v2/" | head -n 1) || true
+
+    echo "==> [push] login Harbor (HTTP insecure lab)"
+    : "${HARBOR_USERNAME:?Missing HARBOR_USERNAME}"
+    : "${HARBOR_PASSWORD:?Missing HARBOR_PASSWORD}"
+    echo "$HARBOR_PASSWORD" | docker login "$HARBOR_HOST" -u "$HARBOR_USERNAME" --password-stdin
+
+    echo "==> [push] build+push images (TAG=$TAG)"
+    docker build \
+      --build-arg REACT_APP_GO_API_BASE=/go \
+      --build-arg REACT_APP_LARAVEL_API_BASE=/laravel \
+      -t "$REGISTRY/frontend:$TAG" \
+      -f frontend/Dockerfile frontend
+    docker push "$REGISTRY/frontend:$TAG"
+
+    docker build -t "$REGISTRY/go:$TAG" -f go/Dockerfile go
+    docker push "$REGISTRY/go:$TAG"
+
+    docker build -t "$REGISTRY/laravel:$TAG" -f laravel/Dockerfile laravel
+    docker push "$REGISTRY/laravel:$TAG"
+
+    echo "==> [push] tag+push :latest"
+    docker tag "$REGISTRY/frontend:$TAG" "$REGISTRY/frontend:latest"
+    docker tag "$REGISTRY/go:$TAG" "$REGISTRY/go:latest"
+    docker tag "$REGISTRY/laravel:$TAG" "$REGISTRY/laravel:latest"
+
+    docker push "$REGISTRY/frontend:latest"
+    docker push "$REGISTRY/go:latest"
+    docker push "$REGISTRY/laravel:latest"
+
+deploy:
+  stage: deploy
+  needs: ["push_images"]
+  script: |
+    set -euo pipefail
+    echo "==> [deploy] validasi variables"
+    : "${KUBECONFIG_PROD:?Missing KUBECONFIG_PROD (GitLab Variables Type: File)}"
+    : "${K8S_IMAGEPULL_SECRET:?Missing K8S_IMAGEPULL_SECRET}"
+    : "${HARBOR_USERNAME:?Missing HARBOR_USERNAME}"
+    : "${HARBOR_PASSWORD:?Missing HARBOR_PASSWORD}"
+    : "${MYSQL_ROOT_PASSWORD:?Missing MYSQL_ROOT_PASSWORD}"
+    : "${MYSQL_DATABASE:?Missing MYSQL_DATABASE}"
+    : "${MYSQL_USER:?Missing MYSQL_USER}"
+    : "${MYSQL_PASSWORD:?Missing MYSQL_PASSWORD}"
+    : "${LARAVEL_APP_KEY:?Missing LARAVEL_APP_KEY}"
+
+    echo "==> [deploy] siapkan kubectl"
+    mkdir -p .bin
+    if [ ! -x .bin/kubectl ]; then
+      curl -fsSL -o .bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+      chmod +x .bin/kubectl
+    fi
+    export PATH="$PWD/.bin:$PATH"
+    kubectl version --client=true
+
+    echo "==> [deploy] set kubeconfig dari File Variable"
+    export KUBECONFIG="$KUBECONFIG_PROD"
+
+    echo "==> [deploy] cek cluster"
+    kubectl get nodes -o wide
+
+    echo "==> [deploy] pastikan namespace (declarative, anti warning apply)"
+    kubectl create ns "$K8S_NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+
+    echo "==> [deploy][addon] tunggu default serviceaccount ready (anti race)"
+    for i in $(seq 1 60); do
+      kubectl -n "$K8S_NS" get sa default >/dev/null 2>&1 && break
+      sleep 1
+    done
+    kubectl -n "$K8S_NS" get sa default >/dev/null 2>&1 || (
+      echo "ERROR: serviceaccount default tidak ada"
+      kubectl -n "$K8S_NS" get sa || true
+      exit 1
+    )
+
+    echo "==> [deploy] create/update app-secrets"
+    kubectl -n "$K8S_NS" create secret generic app-secrets \
+      --from-literal=MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+      --from-literal=MYSQL_DATABASE="$MYSQL_DATABASE" \
+      --from-literal=MYSQL_USER="$MYSQL_USER" \
+      --from-literal=MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+      --from-literal=LARAVEL_APP_KEY="$LARAVEL_APP_KEY" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+    echo "==> [deploy] create/update imagePullSecret Harbor"
+    kubectl -n "$K8S_NS" create secret docker-registry "$K8S_IMAGEPULL_SECRET" \
+      --docker-server="$HARBOR_HOST" \
+      --docker-username="$HARBOR_USERNAME" \
+      --docker-password="$HARBOR_PASSWORD" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+    echo "==> [deploy][addon] pastikan secret imagePull ada"
+    kubectl -n "$K8S_NS" get secret "$K8S_IMAGEPULL_SECRET" >/dev/null 2>&1 || (
+      echo "ERROR: secret $K8S_IMAGEPULL_SECRET tidak ada"
+      kubectl -n "$K8S_NS" get secret || true
+      exit 1
+    )
+
+    echo "==> [deploy] attach imagePullSecret ke default serviceaccount (tidak boleh silent)"
+    kubectl -n "$K8S_NS" patch serviceaccount default \
+      -p "{\"imagePullSecrets\": [{\"name\": \"$K8S_IMAGEPULL_SECRET\"}]}" >/dev/null 2>&1 || true
+
+    echo "==> [deploy][addon] verifikasi SA default"
+    kubectl -n "$K8S_NS" get sa default -o jsonpath='{.imagePullSecrets[*].name}'; echo
+    kubectl -n "$K8S_NS" get sa default -o jsonpath='{.imagePullSecrets[*].name}' | grep -wq "$K8S_IMAGEPULL_SECRET" || (
+      echo "ERROR: imagePullSecret belum nempel ke SA default"
+      kubectl -n "$K8S_NS" get sa default -o yaml || true
+      exit 1
+    )
+
+    echo "==> [deploy] apply manifests"
+    kubectl apply -f deploy/k8s/base/
+
+    kubectl -n "$K8S_NS" get deploy go laravel -o jsonpath='{range .items[*]}{.metadata.name}={.spec.replicas}{"\n"}{end}'
+
+    echo "==> [deploy][addon] STOP GO dulu (anti-race create table)"
+    kubectl -n "$K8S_NS" scale deployment/go --replicas=0 >/dev/null 2>&1 || true
+    kubectl -n "$K8S_NS" delete pod -l app=go --ignore-not-found=true >/dev/null 2>&1 || true
+
+    echo "==> [deploy] update image tag ke commit SHA"
+    kubectl -n "$K8S_NS" set image deployment/frontend frontend="$REGISTRY/frontend:$TAG"
+    kubectl -n "$K8S_NS" set image deployment/go go="$REGISTRY/go:$TAG"
+    # IMPORTANT: update container laravel + initContainer copy-app biar code yang dicopy selalu versi commit yang sama
+    kubectl -n "$K8S_NS" set image deployment/laravel laravel="$REGISTRY/laravel:$TAG" copy-app="$REGISTRY/laravel:$TAG"
+
+    echo "==> [deploy] rollout (frontend dulu)"
+    kubectl -n "$K8S_NS" rollout status deployment/frontend --timeout="$K8S_ROLLOUT_TIMEOUT" || (
+      echo "---- DEBUG (frontend rollout gagal) ----"
+      kubectl -n "$K8S_NS" get pods -o wide || true
+      kubectl -n "$K8S_NS" get events --sort-by=.lastTimestamp | tail -n 120 || true
+      kubectl -n "$K8S_NS" describe deploy frontend || true
+      kubectl -n "$K8S_NS" describe pod -l app=frontend || true
+      exit 1
+    )
+
+    echo "==> [deploy][addon] tunggu mysql ready (jangan di-skip)"
+    kubectl -n "$K8S_NS" rollout status statefulset/mysql --timeout="$K8S_ROLLOUT_TIMEOUT" || (
+      echo "---- DEBUG (mysql rollout gagal) ----"
+      kubectl -n "$K8S_NS" get pods -o wide || true
+      kubectl -n "$K8S_NS" get events --sort-by=.lastTimestamp | tail -n 120 || true
+      kubectl -n "$K8S_NS" describe sts mysql || true
+      kubectl -n "$K8S_NS" describe pod -l app=mysql || true
+      exit 1
+    )
+
+    echo "==> [deploy][addon] tunggu pod mysql-0 Ready (hindari race)"
+    kubectl -n "$K8S_NS" wait --for=condition=Ready pod/mysql-0 --timeout=10m || (
+      echo "---- DEBUG (mysql-0 belum Ready) ----"
+      kubectl -n "$K8S_NS" get pod mysql-0 -o wide || true
+      kubectl -n "$K8S_NS" describe pod mysql-0 || true
+      kubectl -n "$K8S_NS" logs mysql-0 -c mysql --tail=200 || true
+      kubectl -n "$K8S_NS" logs mysql-0 -c mysql --previous --tail=200 || true
+      exit 1
+    )
+
+    echo "==> [deploy][addon] tunggu mysql benar-benar siap (mysqladmin ping)"
+    MYSQL_OK=0
+    for i in $(seq 1 60); do
+      if kubectl -n "$K8S_NS" exec mysql-0 -c mysql -- \
+        mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent; then
+        echo "mysql ready"
+        MYSQL_OK=1
+        break
+      fi
+      echo "waiting mysql... ($i/60)"
+      sleep 2
+    done
+    [ "$MYSQL_OK" -eq 1 ] || (echo "ERROR: mysql belum ready" && exit 1)
+
+    echo "==> [deploy][addon] ensure DB + grant user (idempotent)"
+    kubectl -n "$K8S_NS" exec -i mysql-0 -c mysql -- \
+    mysql -h 127.0.0.1 --protocol=tcp -uroot -p"$MYSQL_ROOT_PASSWORD" <<SQL
+    CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\`;
+    CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
+    ALTER USER '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
+    GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
+    FLUSH PRIVILEGES;
+    SQL
+
+    echo "==> [deploy][addon] jalankan migrate job (anti push pertama error)"
+    JOB_FILE="deploy/k8s/jobs/laravel-migrate-job.yaml"
+
+    kubectl -n "$K8S_NS" delete job laravel-migrate --ignore-not-found=true >/dev/null 2>&1 || true
+    kubectl -n "$K8S_NS" delete pod -l job-name=laravel-migrate --ignore-not-found=true >/dev/null 2>&1 || true
+    kubectl -n "$K8S_NS" wait --for=delete job/laravel-migrate --timeout=30s >/dev/null 2>&1 || true
+
+    sed "s|__LARAVEL_IMAGE__|$REGISTRY/laravel:$TAG|g" "$JOB_FILE" \
+    | kubectl -n "$K8S_NS" apply -f -
+
+    # FAIL-FAST: kalau job cepat gagal, jangan nunggu 30m
+    if kubectl -n "$K8S_NS" wait --for=condition=failed job/laravel-migrate --timeout=60s >/dev/null 2>&1; then
+      echo "ERROR: migrate job FAILED"
+      kubectl -n "$K8S_NS" logs -l job-name=laravel-migrate --all-containers=true --tail=200 || true
+      kubectl -n "$K8S_NS" describe job laravel-migrate || true
+      exit 1
+    fi
+
+    if ! kubectl -n "$K8S_NS" wait --for=condition=complete job/laravel-migrate --timeout=30m >/dev/null 2>&1; then
+      echo "ERROR: migrate job gagal / timeout"
+      kubectl -n "$K8S_NS" logs -l job-name=laravel-migrate --all-containers=true --tail=200 || true
+      kubectl -n "$K8S_NS" describe job laravel-migrate || true
+      exit 1
+    fi
+
+    echo "==> [deploy][addon] START LARAVEL setelah migrate sukses"
+    kubectl -n "$K8S_NS" scale deployment/laravel --replicas=1
+
+    kubectl -n "$K8S_NS" rollout status deployment/laravel --timeout="$K8S_ROLLOUT_TIMEOUT" || (
+      echo "---- DEBUG (laravel rollout gagal) ----"
+      kubectl -n "$K8S_NS" get pods -o wide || true
+      kubectl -n "$K8S_NS" get events --sort-by=.lastTimestamp | tail -n 120 || true
+      kubectl -n "$K8S_NS" describe deploy laravel || true
+      kubectl -n "$K8S_NS" describe pod -l app=laravel || true
+      exit 1
+    )
+
+    echo "==> [deploy][addon] migrate job log (ringkas)"
+    kubectl -n "$K8S_NS" logs -l job-name=laravel-migrate --all-containers=true --tail=200 || true
+
+    echo "==> [deploy][addon] START GO setelah migrate sukses"
+    kubectl -n "$K8S_NS" scale deployment/go --replicas=1
+    kubectl -n "$K8S_NS" rollout status deployment/go --timeout="$K8S_ROLLOUT_TIMEOUT" || (
+      echo "---- DEBUG (go rollout gagal) ----"
+      kubectl -n "$K8S_NS" get pods -o wide || true
+      kubectl -n "$K8S_NS" get events --sort-by=.lastTimestamp | tail -n 120 || true
+      kubectl -n "$K8S_NS" describe deploy go || true
+      kubectl -n "$K8S_NS" describe pod -l app=go || true
+      exit 1
+    )
+
+    echo "==> [deploy] ringkasan"
+    kubectl -n "$K8S_NS" get deploy -o wide
+    kubectl -n "$K8S_NS" get svc -o wide
+    kubectl -n "$K8S_NS" get pods -o wide
+
+    echo "==> [deploy] healthcheck (prioritas NodePort, fallback edge hit.local)"
+    for i in $(seq 1 60); do
+      # NodePort frontend di vm-worker (sesuai skema kamu: 192.168.56.44)
+      if curl -fsSI "http://192.168.56.44:30080/" >/dev/null 2>&1; then
+        echo "OK: frontend NodePort sehat"
+        exit 0
+      fi
+      # fallback: edge nginx di vm-docker (kalau runner shell di host)
+      if curl -kfsS --resolve hit.local:443:127.0.0.1 https://hit.local/ >/dev/null 2>&1; then
+        echo "OK: hit.local sehat"
+        exit 0
+      fi
+      sleep 2
+    done
+
+    echo "ERROR: healthcheck gagal (NodePort + hit.local)"
+    kubectl -n "$K8S_NS" get pods -o wide || true
+    kubectl -n "$K8S_NS" describe pods || true
+    exit 1
+
+monitoring_install:
+  stage: monitoring
+  needs: ["deploy"]
+  # kalau mau auto, hapus baris "when: manual"
+  when: manual
+  script: |
+    set -euo pipefail
+    : "${KUBECONFIG_PROD:?Missing KUBECONFIG_PROD (GitLab Variables Type: File)}"
+
+    mkdir -p .bin
+
+    echo "==> [monitoring] siapkan kubectl"
+    if [ ! -x .bin/kubectl ]; then
+      curl -fsSL -o .bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+      chmod +x .bin/kubectl
+    fi
+    export PATH="$PWD/.bin:$PATH"
+
+    echo "==> [monitoring] set kubeconfig dari File Variable (WAJIB sebelum kubectl/helm)"
+    export KUBECONFIG="$KUBECONFIG_PROD"
+    chmod 600 "$KUBECONFIG" || true
+
+    echo "==> [monitoring] siapkan helm (binary)"
+    if [ ! -x .bin/helm ]; then
+      curl -fsSLO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+      tar -xzf "helm-${HELM_VERSION}-linux-amd64.tar.gz"
+      install -m 0755 linux-amd64/helm .bin/helm
+    fi
+
+    echo "==> [monitoring] cek cluster"
+    kubectl get nodes -o wide
+
+    echo "==> [monitoring] namespace monitoring"
+    kubectl get ns "$MON_NS" >/dev/null 2>&1 || kubectl create ns "$MON_NS"
+
+    echo "==> [monitoring] add repo"
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm repo add grafana https://grafana.github.io/helm-charts
+    helm repo update
+
+    echo "==> [monitoring] install/upgrade kube-prometheus-stack (+ datasource loki)"
+    helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+      -n "$MON_NS" \
+      -f deploy/monitoring/kps-datasource-loki.yaml \
+      --wait --timeout 20m
+
+    echo "==> [monitoring] install/upgrade loki (lab single binary)"
+    helm upgrade --install loki grafana/loki \
+      -n "$MON_NS" \
+      -f deploy/monitoring/loki-values-lab.yaml \
+      --wait --timeout 20m
+
+    echo "==> [monitoring] install/upgrade promtail"
+    helm upgrade --install promtail grafana/promtail \
+      -n "$MON_NS" \
+      -f deploy/monitoring/promtail-values.yaml \
+      --wait --timeout 20m
+
+    echo "==> [monitoring] expose UI via NodePort (PATCH service yang sudah ada = aman)"
+    kubectl -n "$MON_NS" patch svc kps-grafana -p '{
+      "spec":{"type":"NodePort","ports":[{"name":"http","port":80,"targetPort":3000,"nodePort":30030}]}
+    }'
+    kubectl -n "$MON_NS" patch svc kps-kube-prometheus-stack-prometheus -p '{
+      "spec":{"type":"NodePort","ports":[{"name":"http-web","port":9090,"targetPort":9090,"nodePort":30090}]}
+    }'
+    kubectl -n "$MON_NS" patch svc loki-gateway -p '{
+      "spec":{"type":"NodePort","ports":[{"name":"http","port":80,"targetPort":80,"nodePort":30100}]}
+    }'
+
+    echo "==> [monitoring] ringkasan svc"
+    kubectl -n "$MON_NS" get svc | egrep -i 'kps-grafana|kps-kube-prometheus-stack-prometheus|loki-gateway'
+
+    echo "==> [monitoring] Grafana admin password (LAB)"
+    kubectl -n "$MON_NS" get secret kps-grafana -o jsonpath="{.data.admin-password}" | base64 -d; echo
+
+    echo "==> [monitoring] URL (pakai IP vm-worker: 192.168.56.44)"
+    echo "Grafana    : http://192.168.56.44:30030"
+    echo "Prometheus : http://192.168.56.44:30090"
+    echo "Loki       : http://192.168.56.44:30100"
+```
 
 Buat cert:
 
