@@ -244,7 +244,7 @@ Buat file edge.conf
 nano deploy/edge/nginx/conf.d/edge.conf
 ```
 
-isi file diatas dengan konfig dibawah ini
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 # rate limiting zone
@@ -289,7 +289,7 @@ Buat file docker-compose.yml
 nano deploy/edge/docker-compose.edge.yml
 ```
 
-isi file diatas dengan konfig dibawah ini
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 services:
@@ -332,7 +332,7 @@ Buat file 10-mysql.yaml
 nano deploy/k8s/base/10-mysql.yaml
 ```
 
-isi file diatas dengan konfig dibawah ini
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 apiVersion: v1
@@ -473,7 +473,7 @@ Buat file 20-go.yaml
 nano deploy/k8s/base/20-go.yaml
 ```
 
-isi file diatas dengan konfig dibawah ini
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 apiVersion: v1
@@ -544,7 +544,7 @@ Buat file 30-laravel.yaml
 nano deploy/k8s/base/30-laravel.yaml
 ```
 
-isi file diatas dengan konfig dibawah ini
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 apiVersion: v1
@@ -694,7 +694,7 @@ Buat file 40-frontend.yaml
 nano deploy/k8s/base/40-frontend.yaml
 ```
 
-isi file diatas dengan konfig dibawah ini
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 apiVersion: v1
@@ -742,7 +742,7 @@ Buat file laravel-migrate-job.yaml
 nano deploy/k8s/jobs/laravel-migrate-job.yaml
 ```
 
-isi file diatas dengan konfig dibawah ini
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 apiVersion: batch/v1
@@ -1013,6 +1013,8 @@ Buat file /frontend/.env.development
 nano ~/three-body-problem/frontend/.env.development
 ```
 
+Isi file diatas dengan konfig dibawah ini
+
 ```bash
 REACT_APP_GO_API_BASE=http://localhost:8080
 REACT_APP_LARAVEL_API_BASE=http://localhost:8001
@@ -1024,6 +1026,8 @@ Buat file frontend/.env.production
 nano ~/three-body-problem/frontend/.env.production
 ```
 
+Isi file diatas dengan konfig dibawah ini
+
 ```bash
 REACT_APP_GO_API_BASE=/go
 REACT_APP_LARAVEL_API_BASE=/laravel
@@ -1034,6 +1038,8 @@ Buat file frontend/.dockerignore
 ```bash
 nano ~/three-body-problem/frontend/.dockerignore
 ```
+
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 node_modules
@@ -1047,6 +1053,8 @@ Buat file go/.dockerignore
 ```bash
 nano ~/three-body-problem/go/.dockerignore
 ```
+
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 bin
@@ -1062,6 +1070,8 @@ Buat file laravel/.dockerignore
 ```bash
 nano ~/three-body-problem/laravel/.dockerignore
 ```
+
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 /vendor
@@ -1082,6 +1092,8 @@ Buat file frontend/Dockerfile
 nano ~/three-body-problem/frontend/Dockerfile
 ```
 
+Isi file diatas dengan konfig dibawah ini
+
 ```bash
 FROM node:18-alpine as build
 WORKDIR /app
@@ -1101,6 +1113,8 @@ Buat file go/Dockerfile
 ```bash
 nano ~/three-body-problem/go/Dockerfile
 ```
+
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 FROM golang:1.21-alpine as build
@@ -1123,6 +1137,8 @@ Buat file laravel/Dockerfile
 nano ~/three-body-problem/laravel/Dockerfile
 ```
 
+Isi file diatas dengan konfig dibawah ini
+
 ```bash
 FROM php:8.2-fpm
 
@@ -1143,11 +1159,297 @@ EXPOSE 9000
 CMD ["php-fpm"]
 ```
 
+Edit file frontend/src/App.js
+
+```bash
+nano ~/three-body-problem/frontend/src/App.js
+```
+
+Isi file diatas dengan konfig dibawah ini
+
+```bash
+import React, { useMemo, useState } from "react";
+import "./App.css";
+
+/**
+ * Frontend akan hit 2 backend:
+ * - Go API via Edge Nginx: /go/api/products
+ * - Laravel API via Edge Nginx: /laravel/api/products
+ *
+ * Env yang dipakai (CRA harus prefix REACT_APP_):
+ * - REACT_APP_GO_API_BASE
+ * - REACT_APP_LARAVEL_API_BASE
+ */
+function App() {
+  const [data, setData] = useState(null);
+  const [activeAPI, setActiveAPI] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // Base path (prod) atau full URL (dev)
+  const GO_API_BASE = useMemo(() => {
+    return (process.env.REACT_APP_GO_API_BASE || "/go").replace(/\/$/, "");
+  }, []);
+
+  const LARAVEL_API_BASE = useMemo(() => {
+    return (process.env.REACT_APP_LARAVEL_API_BASE || "/laravel").replace(/\/$/, "");
+  }, []);
+
+  // Endpoint yang diminta tugas (umumnya)
+  const PRODUCTS_PATH = "/api/products";
+
+  const endpoints = useMemo(() => {
+    return {
+      go: `${GO_API_BASE}${PRODUCTS_PATH}`,
+      laravel: `${LARAVEL_API_BASE}${PRODUCTS_PATH}`,
+    };
+  }, [GO_API_BASE, LARAVEL_API_BASE]);
+
+  // Biar tampilan aman walau response shape beda-beda
+  const normalizePayload = (payload) => {
+    // 1) kalau array langsung dianggap list produk
+    if (Array.isArray(payload)) {
+      return {
+        success: true,
+        message: "OK",
+        count: payload.length,
+        data: payload,
+        raw: null,
+      };
+    }
+
+    // 2) kalau object, cek pola umum
+    if (payload && typeof payload === "object") {
+      // pola { success, message, count, data: [] }
+      if (Array.isArray(payload.data)) {
+        return {
+          success: payload.success ?? true,
+          message: payload.message ?? "OK",
+          count: payload.count ?? payload.data.length,
+          data: payload.data,
+          raw: null,
+        };
+      }
+
+      // pola { products: [] }
+      if (Array.isArray(payload.products)) {
+        return {
+          success: true,
+          message: "OK",
+          count: payload.products.length,
+          data: payload.products,
+          raw: null,
+        };
+      }
+
+      // pola lain: tampilkan raw
+      return {
+        success: payload.success ?? true,
+        message: payload.message ?? "OK",
+        count: payload.count ?? 0,
+        data: [],
+        raw: payload,
+      };
+    }
+
+    // 3) selain itu
+    return { success: true, message: "OK", count: 0, data: [], raw: payload };
+  };
+
+  const fetchJson = async (url) => {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+
+    // kalau server balikin non-JSON, ini tetap aman
+    const text = await response.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = { success: false, message: "Non-JSON response", raw: text };
+    }
+
+    if (!response.ok) {
+      // normalisasi error supaya UI tetap konsisten
+      return {
+        success: false,
+        message: `HTTP ${response.status}`,
+        error: parsed?.error || parsed?.message || "Request failed",
+        raw: parsed,
+      };
+    }
+
+    return parsed;
+  };
+
+  const fetchLaravelData = async () => {
+    setLoading(true);
+    setActiveAPI("Laravel");
+    setData(null);
+
+    try {
+      const payload = await fetchJson(endpoints.laravel);
+      const normalized = normalizePayload(payload);
+      setData(normalized);
+    } catch (err) {
+      setData({
+        success: false,
+        message: "Error connecting to Laravel API",
+        error: err?.message || String(err),
+        data: [],
+        count: 0,
+        raw: null,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchGoData = async () => {
+    setLoading(true);
+    setActiveAPI("Go");
+    setData(null);
+
+    try {
+      const payload = await fetchJson(endpoints.go);
+      const normalized = normalizePayload(payload);
+      setData(normalized);
+    } catch (err) {
+      setData({
+        success: false,
+        message: "Error connecting to Go API",
+        error: err?.message || String(err),
+        data: [],
+        count: 0,
+        raw: null,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderProducts = (products) => {
+    if (!products || products.length === 0) return null;
+
+    return (
+      <div className="products-list">
+        <h4>Daftar Produk:</h4>
+        {products.map((p, index) => {
+          const name = p.name ?? p.title ?? `Product ${index + 1}`;
+          const price = p.price ?? p.cost ?? "-";
+          const category = p.category ?? p.type ?? "-";
+          const quantity = p.quantity ?? p.stock ?? "-";
+          const description = p.description ?? p.desc ?? "";
+
+          return (
+            <div key={p.id ?? index} className="product-card">
+              <h5>{name}</h5>
+              <p>
+                <strong>Harga:</strong> {price}
+              </p>
+              <p>
+                <strong>Kategori:</strong> {category}
+              </p>
+              <p>
+                <strong>Stok:</strong> {quantity}
+              </p>
+              {description ? <p className="description">{description}</p> : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderData = () => {
+    if (!data) return null;
+
+    return (
+      <div className="data-container">
+        <h3>Hasil dari {activeAPI} API:</h3>
+
+        {data.success ? (
+          <div className="success-data">
+            <p>
+              <strong>Status:</strong> ✅ {data.message}
+            </p>
+            <p>
+              <strong>Total Products:</strong> {data.count || 0}
+            </p>
+
+            {renderProducts(data.data)}
+
+            {data.raw ? (
+              <>
+                <h4>Raw Response (debug):</h4>
+                <pre style={{ textAlign: "left", whiteSpace: "pre-wrap" }}>
+                  {JSON.stringify(data.raw, null, 2)}
+                </pre>
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <div className="error-data">
+            <p>
+              <strong>Status:</strong> ❌ {data.message}
+            </p>
+            <p>
+              <strong>Error:</strong> {data.error || "Unknown error"}
+            </p>
+            {data.raw ? (
+              <pre style={{ textAlign: "left", whiteSpace: "pre-wrap" }}>
+                {JSON.stringify(data.raw, null, 2)}
+              </pre>
+            ) : null}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>🚀 Products API Frontend</h1>
+        <p className="subtitle">Interface untuk mengakses Laravel API dan Go API</p>
+
+        <div className="buttons-container">
+          <button className="api-button laravel-btn" onClick={fetchLaravelData} disabled={loading}>
+            {loading && activeAPI === "Laravel" ? <span>⏳ Loading...</span> : <span>🐘 Hit Laravel API</span>}
+          </button>
+
+          <button className="api-button go-btn" onClick={fetchGoData} disabled={loading}>
+            {loading && activeAPI === "Go" ? <span>⏳ Loading...</span> : <span>🐹 Hit Go API</span>}
+          </button>
+        </div>
+
+        <div className="api-info">
+          <div className="api-endpoint">
+            <strong>Laravel Endpoint:</strong> <code>{endpoints.laravel}</code>
+          </div>
+          <div className="api-endpoint">
+            <strong>Go Endpoint:</strong> <code>{endpoints.go}</code>
+          </div>
+        </div>
+
+        {renderData()}
+      </header>
+    </div>
+  );
+}
+
+export default App;
+
+```
+
 Buat file .gitignore
 
 ```bash
 nano ~/three-body-problem/.gitignore
 ```
+
+Isi file diatas dengan konfig dibawah ini
 
 ```bash
 # CI helper binaries
@@ -1923,357 +2225,6 @@ Di bawah ini adalah blok **yang bisa kamu tempel langsung** ke runbook utama kam
 
 ***
 
-## C. VM-K8S (192.168.56.43) — Kubernetes control-plane (+ Monitoring sebelum push pertama)
-
-### C6) Monitoring + Logging (Grafana + Prometheus + Loki + Promtail) — WAJIB SEBELUM PUSH PERTAMA
-
-> Jalankan di **vm-k8s** sebagai user `cikal`.
-
-#### C6.0) Gate awal (harus Ready dulu)
-
-```bash
-kubectl get nodes -o wide
-kubectl get pods -A | head
-```
-
-Target:
-
-* `vm-k8s` **Ready**
-* (kalau `vm-worker` sudah join) `vm-worker` juga **Ready**
-
-Kalau ada NotReady → stop dulu, beresin dulu sampai Ready.
-
-***
-
-#### Jika ingin test install manual untuk tahapan monitoringnya lakukan hal dibawah ini
-
-#### C6.1) DNS fix untuk Helm repo (wajib, anti “could not resolve host”)
-
-> Ini sama konsepnya dengan A4, tapi kita pastikan di vm-k8s bener-bener OK.
-
-```bash
-sudo tee /etc/systemd/resolved.conf >/dev/null <<'EOF'
-[Resolve]
-DNS=1.1.1.1 8.8.8.8
-FallbackDNS=9.9.9.9 8.8.4.4
-DNSStubListener=yes
-EOF
-
-sudo systemctl restart systemd-resolved
-sudo resolvectl flush-caches
-sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
-```
-
-Gate:
-
-```bash
-cat /etc/resolv.conf
-getent hosts github.com || true
-getent hosts get.helm.sh || true
-```
-
-> Catatan: kalau `baltocdn.com` gagal itu **tidak masalah**, runbook ini **tidak pakai baltocdn**.
-
-***
-
-#### C6.2) Install Helm (versi aman: binary dari get.helm.sh)
-
-Kalau dulu kamu pernah install helm via apt repo dan bikin masalah, bersihkan dulu:
-
-```bash
-sudo rm -f /etc/apt/sources.list.d/helm-stable-debian.list
-sudo rm -f /etc/apt/keyrings/helm.gpg
-sudo apt-get update -y
-```
-
-Install helm binary:
-
-```bash
-cd /tmp
-VER="v3.14.4"
-curl -fsSLO "https://get.helm.sh/helm-${VER}-linux-amd64.tar.gz"
-tar -xzf "helm-${VER}-linux-amd64.tar.gz"
-sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
-
-helm version
-which helm
-```
-
-Gate target:
-
-* `helm version` keluar (tidak error)
-* `which helm` menunjuk `/usr/local/bin/helm`
-
-***
-
-#### C6.3) Add repo chart (Prometheus stack + Grafana)
-
-```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo add grafana https://grafana.github.io/helm-charts
-helm repo update
-```
-
-Gate:
-
-```bash
-helm repo list
-```
-
-***
-
-#### C6.4) Buat folder “values permanen” (biar konsisten dan bisa install ulang identik)
-
-```bash
-sudo mkdir -p /deploy/monitoring
-sudo chown -R "$USER:$USER" /deploy/monitoring
-```
-
-***
-
-#### C6.5) Install Monitoring: kube-prometheus-stack (Prometheus + Grafana + Node Exporter + KSM)
-
-Namespace:
-
-```bash
-kubectl get ns monitoring >/dev/null 2>&1 || kubectl create ns monitoring
-```
-
-Install:
-
-```bash
-helm upgrade --install kps prometheus-community/kube-prometheus-stack -n monitoring
-```
-
-Tunggu siap:
-
-```bash
-kubectl -n monitoring get pods -o wide
-```
-
-Ambil password Grafana:
-
-```bash
-kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo
-```
-
-Simpan password (opsional, untuk catatan kamu):
-
-```bash
-echo "Grafana admin password: $(kubectl -n monitoring get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d)" \
-| tee /opt/runbook/monitoring/grafana-admin-password.txt
-```
-
-***
-
-#### C6.6) Install Loki (lab ringan, anti CrashLoop read-only)
-
-Buat values Loki (ini versi stabil yang kamu pakai):
-
-```bash
-cat > /deploy/monitoring/loki-values-lab.yaml <<'EOF'
-deploymentMode: SingleBinary
-
-test:
-  enabled: false
-
-loki:
-  auth_enabled: false
-  useTestSchema: true
-
-  containerSecurityContext:
-    readOnlyRootFilesystem: false
-
-  commonConfig:
-    replication_factor: 1
-
-  storage:
-    type: filesystem
-    bucketNames:
-      chunks: chunks
-      ruler: ruler
-      admin: admin
-
-singleBinary:
-  replicas: 1
-  persistence:
-    enabled: false
-
-  extraVolumes:
-    - name: loki-data
-      emptyDir: {}
-  extraVolumeMounts:
-    - name: loki-data
-      mountPath: /var/loki
-
-gateway:
-  enabled: true
-
-minio:
-  enabled: false
-
-lokiCanary:
-  enabled: false
-
-chunksCache:
-  enabled: false
-
-resultsCache:
-  enabled: false
-
-backend: { replicas: 0 }
-read: { replicas: 0 }
-write: { replicas: 0 }
-EOF
-```
-
-Install:
-
-```bash
-helm upgrade --install loki grafana/loki -n monitoring -f /deploy/monitoring/loki-values-lab.yaml
-```
-
-Gate:
-
-```bash
-kubectl -n monitoring get pod loki-0 -w
-kubectl -n monitoring get svc | egrep -i 'loki|memberlist|gateway'
-```
-
-***
-
-#### C6.7) Install Promtail (kirim log pod ke Loki)
-
-Buat values:
-
-```bash
-cat > /deploy/monitoring/promtail-values.yaml <<'EOF'
-config:
-  clients:
-    - url: http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push
-
-resources:
-  requests:
-    cpu: 50m
-    memory: 64Mi
-  limits:
-    cpu: 200m
-    memory: 256Mi
-EOF
-```
-
-Install:
-
-```bash
-helm upgrade --install promtail grafana/promtail -n monitoring -f /deploy/monitoring/promtail-values.yaml
-```
-
-Gate:
-
-```bash
-kubectl -n monitoring get ds/promtail
-kubectl -n monitoring get pods -o wide | egrep -i promtail
-```
-
-***
-
-#### C6.8) Tambahkan Loki sebagai Data Source Grafana (Helm upgrade kps)
-
-Buat values datasource:
-
-```bash
-cat > /deploy/monitoring/kps-datasource-loki.yaml <<'EOF'
-grafana:
-  additionalDataSources:
-    - name: Loki
-      type: loki
-      access: proxy
-      url: http://loki-gateway.monitoring.svc.cluster.local
-      isDefault: false
-      jsonData:
-        maxLines: 1000
-EOF
-```
-
-Apply:
-
-```bash
-helm upgrade kps prometheus-community/kube-prometheus-stack -n monitoring -f /opt/runbook/monitoring/kps-datasource-loki.yaml
-kubectl -n monitoring rollout status deploy/kps-grafana
-```
-
-***
-
-#### C6.9) Akses UI via systemd port-forward (biar restart VM tetap aman)
-
-> Ini yang bikin setelah reboot vm-k8s, UI monitoring bisa balik tanpa kamu port-forward manual.
-
-**Grafana**
-
-```bash
-sudo tee /etc/systemd/system/kpf-grafana.service >/dev/null <<'EOF'
-[Unit]
-Description=Kubernetes Port-Forward Grafana (monitoring)
-After=network-online.target kubelet.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-Environment=KUBECONFIG=/etc/kubernetes/admin.conf
-ExecStart=/usr/bin/kubectl -n monitoring port-forward svc/kps-grafana 3000:80 --address 192.168.56.43
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-```
-
-**Prometheus**
-
-```bash
-sudo tee /etc/systemd/system/kpf-prometheus.service >/dev/null <<'EOF'
-[Unit]
-Description=Kubernetes Port-Forward Prometheus (monitoring)
-After=network-online.target kubelet.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-Environment=KUBECONFIG=/etc/kubernetes/admin.conf
-ExecStart=/usr/bin/kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090:9090 --address 192.168.56.43
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-```
-
-**Loki gateway**
-
-```bash
-sudo tee /etc/systemd/system/kpf-loki.service >/dev/null <<'EOF'
-[Unit]
-Description=Kubernetes Port-Forward Loki Gateway (monitoring)
-After=network-online.target kubelet.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-Environment=KUBECONFIG=/etc/kubernetes/admin.conf
-ExecStart=/usr/bin/kubectl -n monitoring port-forward svc/loki-gateway 3100:80 --address 192.168.56.43
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now kpf-grafana kpf-prometheus kpf-loki
-```
-
 Gate:
 
 ```bash
@@ -2495,172 +2446,6 @@ scp cikal@192.168.56.43:~/.kube/config ./kubeconfig-prod
 ```
 
 Upload file itu ke variable `KUBECONFIG_PROD` (Type: File).
-
-***
-
-Setelah semua langkah-langkah setup diatas sudah dilakukan, lanjut pastikan dengan menjalankan perintah dibawah ini.
-
-#### ✅ ADD-ON 1
-
-> Tujuan: memastikan **docker daemon** sudah benar-benar mengizinkan insecure registry, dan runner (user `gitlab-runner`) bisa resolve & akses Harbor.
-
-```bash
-# =========================================================
-# ADD-ON: VALIDASI DOCKER + RUNNER BISA AKSES HARBOR
-# Tempel setelah B2 (atau setelah ADD-ON Harbor UP)
-# =========================================================
-
-echo "=== [Docker] pastikan insecure registry kebaca ==="
-docker info | egrep -i "insecure|registry" || true
-
-echo "=== [DNS] pastikan harbor.local resolve ke IP yang benar ==="
-getent hosts harbor.local
-
-echo "=== [Runner] cek dari konteks user gitlab-runner ==="
-sudo -u gitlab-runner getent hosts harbor.local || true
-sudo -u gitlab-runner bash -lc 'curl -fsSI http://harbor.local:8080/v2/ | head -n 1' || true
-```
-
-#### ✅ ADD-ON 2
-
-> Tujuan: memastikan Harbor **benar-benar UP** dan **listen di 8080** sebelum kamu lanjut ke step berikutnya / sebelum push pertama ke GitLab.
-
-```bash
-# =========================================================
-# ADD-ON: HARBOUR MUST BE UP (wajib sebelum pipeline pertama)
-# Tempel setelah B3 (Install & cek Harbor)
-# =========================================================
-
-echo "=== [Harbor] cek container status ==="
-sudo docker compose -f /opt/harbor/docker-compose.yml ps
-
-echo "=== [Harbor] pastikan port 8080 LISTEN di host ==="
-# harus ada output LISTEN untuk :8080
-sudo ss -lntp | grep ':8080' || true
-
-echo "=== [Harbor] sanity check endpoint /v2 (401 normal) ==="
-# target: dapat HTTP/1.1 401 Unauthorized (yang penting bukan connection refused)
-curl -fsSI http://harbor.local:8080/v2/ | head -n 1 || true
-
-echo "=== [Harbor] kalau masih connection refused: start ulang Harbor ==="
-cd /opt/harbor
-sudo docker compose -f /opt/harbor/docker-compose.yml up -d
-sudo docker compose -f /opt/harbor/docker-compose.yml ps
-
-echo "=== [Harbor] cek log nginx harbor kalau masih gagal ==="
-# cari error bind port / crash loop
-sudo docker compose -f /opt/harbor/docker-compose.yml logs --tail=120 nginx || true
-sudo docker compose -f /opt/harbor/docker-compose.yml logs --tail=120 harbor-core || true
-sudo docker compose -f /opt/harbor/docker-compose.yml logs --tail=120 registry || true
-
-echo "=== [Harbor] cek lagi port 8080 & /v2 ==="
-sudo ss -lntp | grep ':8080' || true
-curl -fsSI http://harbor.local:8080/v2/ | head -n 1 || true
-
-echo "=== [Harbor] cek konflik port (kalau 8080 tidak bisa bind) ==="
-# kalau ada service lain pakai 8080, akan kelihatan di sini
-sudo lsof -iTCP:8080 -sTCP:LISTEN -nP || true
-```
-
-#### ✅ ADD-ON 2 (Opsional tapi sangat membantu): “Harbor readiness gate sebelum push pertama”
-
-```bash
-# =========================================================
-# ADD-ON: HARBOR READINESS GATE (wajib sebelum pipeline pertama)
-# Jalankan di vm-docker
-# =========================================================
-echo "=== Harbor containers ==="
-sudo docker compose -f /opt/harbor/docker-compose.yml ps
-
-echo "=== Port 8080 must LISTEN ==="
-sudo ss -lntp | grep ':8080'
-
-echo "=== /v2 must respond (401 is OK) ==="
-curl -fsSI http://harbor.local:8080/v2/ | head -n 1
-```
-
-Patokan:
-
-* ada LISTEN `:8080`
-* `/v2` balas `HTTP/1.1 401 Unauthorized`
-
-Kalau ini lolos, job push akan aman.
-
-***
-
-#### ✅ ADD-ON 3
-
-> Tujuan: bikin “gate” terakhir supaya kamu **tidak push** kalau Harbor belum siap (biar pipeline pertama tidak gagal lagi).
-
-```bash
-# =========================================================
-# ADD-ON: FINAL PRE-FLIGHT SEBELUM PUSH PERTAMA KE GITLAB
-# Tempel tepat sebelum E2 (Push pertama)
-# =========================================================
-
-echo "=== FINAL CHECK: Harbor harus hidup & reachable ==="
-curl -fsSI http://harbor.local:8080/v2/ | head -n 1 || (
-  echo "ERROR: Harbor tidak reachable di http://harbor.local:8080"
-  echo "Pastikan: Harbor containers UP, port 8080 LISTEN, dan UFW tidak blok."
-  exit 1
-)
-
-echo "=== FINAL CHECK: project 'threebody' sudah dibuat di UI Harbor ==="
-echo "Buka: http://harbor.local:8080/ lalu pastikan project threebody ada."
-```
-
-#### ✅ ADD-ON 4 “Bootstrap ImagePull Secret di K8S sebelum pipeline pertama”
-
-Dengan ADD-ON ini, sebelum push pertama kamu “mengunci” kondisi cluster supaya **selaras** dengan `.gitlab-ci.yml`.
-
-```bash
-# =========================================================
-# ADD-ON: K8S BOOTSTRAP IMAGEPULL (sekali saja sebelum pipeline pertama)
-# Jalankan di vm-k8s
-# =========================================================
-NS=threebody-prod
-SECRET=harbor-regcred
-
-echo "=== namespace ==="
-kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
-
-echo "=== serviceaccount default ==="
-kubectl -n "$NS" get sa default >/dev/null 2>&1 || kubectl -n "$NS" create sa default
-
-echo "=== create/refresh secret $SECRET ==="
-kubectl -n "$NS" create secret docker-registry "$SECRET" \
-  --docker-server="harbor.local:8080" \
-  --docker-username="admin" \
-  --docker-password="Harbor12345" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-echo "=== attach ke SA default ==="
-kubectl -n "$NS" patch sa default --type merge \
-  -p '{"imagePullSecrets":[{"name":"'"$SECRET"'"}]}'
-
-echo "=== verifikasi ==="
-kubectl -n "$NS" get secret "$SECRET" -o name
-kubectl -n "$NS" get sa default -o jsonpath='{.imagePullSecrets[*].name}'; echo
-```
-
-> Kalau kamu nanti pakai username/password Harbor dari GitLab Variables (bukan hardcode), kamu bisa jalankan bootstrap ini setelah kamu yakin kredensial Harbor benar. Tapi untuk runbook “sekali push lab”, ini yang paling stabil.
-
-***
-
-**✅ ADD-ON LARAVEL SMOKE TEST (wajib)**
-
-**Tempatkan:** di runbook **setelah pipeline deploy sukses** (misal setelah ringkasan deploy / healthcheck)
-
-```bash
-# =========================================================
-# ADD-ON: SMOKE TEST LARAVEL & GO VIA EDGE
-# Lokasi: vm-docker (setelah deploy sukses)
-# =========================================================
-curl -kfsS --resolve hit.local:443:127.0.0.1 https://hit.local/go/api/products | head
-curl -kfsS --resolve hit.local:443:127.0.0.1 https://hit.local/laravel/api/products | head
-```
-
-Target: dua-duanya balik JSON (bukan HTML Apache 404/403).
 
 ***
 
