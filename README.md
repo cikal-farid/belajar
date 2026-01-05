@@ -951,7 +951,7 @@ grafana:
         maxLines: 1000
 EOF
 
-# 3) service nodeport
+# 4) service nodeport
 cat > deploy/monitoring/expose-ui-nodeport.yaml <<'EOF'
 apiVersion: v1
 kind: Service
@@ -1104,7 +1104,7 @@ nano ~/three-body-problem/go/Dockerfile
 Isi file diatas dengan konfig dibawah ini
 
 ```bash
-FROM golang:1.21-alpine as build
+FROM golang:1.21-alpine AS build
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -1131,16 +1131,26 @@ FROM php:8.2-fpm
 
 RUN apt-get update && apt-get install -y \
     git curl libpng-dev libonig-dev libxml2-dev zip unzip \
- && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
+ && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www
 COPY . /var/www
 
-RUN composer install --no-interaction --prefer-dist --optimize-autoloader
+# WAJIB: bikin folder yang dipakai Laravel untuk cache/view compiled
+RUN mkdir -p \
+      /var/www/bootstrap/cache \
+      /var/www/storage/framework/cache \
+      /var/www/storage/framework/sessions \
+      /var/www/storage/framework/views \
+      /var/www/storage/logs \
+ && chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache \
+ && chmod -R 775 /var/www/storage /var/www/bootstrap/cache
 
-RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
+# saran production: no-dev biar ga install phpunit dll
+RUN composer install --no-interaction --prefer-dist --no-dev --optimize-autoloader
 
 EXPOSE 9000
 CMD ["php-fpm"]
