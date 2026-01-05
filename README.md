@@ -951,7 +951,7 @@ grafana:
         maxLines: 1000
 EOF
 
-# 3) KPS datasource Loki
+# 3) service nodeport
 cat > deploy/monitoring/expose-ui-nodeport.yaml <<'EOF'
 apiVersion: v1
 kind: Service
@@ -1001,7 +1001,7 @@ spec:
       port: 80
       targetPort: 80
       nodePort: 30100
-
+EOF
 
 echo "=== CEK file monitoring ==="
 ls -lah deploy/monitoring
