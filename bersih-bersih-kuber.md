@@ -96,3 +96,11 @@ Login:
 user: admin
 
 password: hasil command di atas
+
+
+
+runner gitlab
+
+```bash
+glrt-hWB7U5nLqJ4SsX6VkNqaVW86MQpwOjFhNGZudwp0OjMKdTpocWd0ahg.01.1j05grwwk
+```
