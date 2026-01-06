@@ -1,5 +1,13 @@
 # Monitoring + Logging (Grafana + Prometheus + Loki)
 
+## Monitoring + Logging (Grafana + Prometheus + Loki)
+
+Sip — dari output kamu, prosesnya **sudah aman** dan akar masalahnya ketemu: **`baltocdn.com` memang tidak bisa di-resolve** di environment kamu, tapi **`get.helm.sh` + `github.com` bisa**. Jadi runbook harus **JANGAN bergantung ke repo APT baltocdn**, dan default install Helm pakai **binary dari get.helm.sh** (yang terbukti sukses di kamu).
+
+Di bawah ini **runbook final (monitoring + logging) versi “anti gagal”** sesuai kendala yang kamu alami.
+
+***
+
 ### RUNBOOK FINAL — Monitoring + Logging (2 Node Lab)
 
 Target:

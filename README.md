@@ -1,6 +1,8 @@
-# Final Test DevOps
+# Runbook Three-Body-Problem
 
-#### Target arsitektur (yang akan jadi “hasil akhir”)
+## Final Test DevOps
+
+**Target arsitektur (yang akan jadi “hasil akhir”)**
 
 **Host-only network:** `192.168.56.0/24`
 
@@ -26,7 +28,7 @@ https://hit.local
 
 ***
 
-### A. LANGKAH WAJIB DI SEMUA VM (vm-docker, vm-k8s, vm-worker)
+#### A. LANGKAH WAJIB DI SEMUA VM (vm-docker, vm-k8s, vm-worker)
 
 **A1) HARDEN semua VM: matikan auto update & cegah restart service otomatis**
 
@@ -56,7 +58,7 @@ fi
 
 ***
 
-#### A2) Set hostname
+**A2) Set hostname**
 
 Jalankan sesuai VM:
 
@@ -78,7 +80,7 @@ sudo hostnamectl set-hostname vm-k8s
 sudo hostnamectl set-hostname vm-worker
 ```
 
-#### A3) `/etc/hosts` wajib (biar `harbor.local` & `hit.local` stabil)
+**A3) `/etc/hosts` wajib (biar `harbor.local` & `hit.local` stabil)**
 
 Jalankan di **SEMUA VM**:
 
@@ -94,7 +96,7 @@ getent hosts harbor.local hit.local vm-k8s vm-worker
 hostname
 ```
 
-#### A4) DNS fix (menghindari “GitLab kadang resolve kadang tidak”)
+**A4) DNS fix (menghindari “GitLab kadang resolve kadang tidak”)**
 
 Jalankan di **SEMUA VM**:
 
@@ -117,9 +119,9 @@ getent hosts gitlab.com altssh.gitlab.com registry-1.docker.io || true
 
 ***
 
-### B. VM-DOCKER (192.168.56.42) — Docker + Harbor + Edge + GitLab Runner
+#### B. VM-DOCKER (192.168.56.42) — Docker + Harbor + Edge + GitLab Runner
 
-#### B1) Install tools + Docker
+**B1) Install tools + Docker**
 
 ```bash
 sudo apt-get update -y
@@ -145,7 +147,7 @@ docker version
 docker compose version
 ```
 
-#### B2) Docker allow insecure registry Harbor (HTTP)
+**B2) Docker allow insecure registry Harbor (HTTP)**
 
 ```bash
 sudo mkdir -p /etc/docker
@@ -159,7 +161,7 @@ sudo systemctl restart docker
 docker info | egrep -i "insecure|registry" || true
 ```
 
-#### B3) Install Harbor (HTTP :8080)
+**B3) Install Harbor (HTTP :8080)**
 
 > Harbor jalan di container `nginx` milik Harbor, port **8080**.
 
@@ -215,7 +217,7 @@ Di UI Harbor:
 * `http://harbor.local:8080/`
 * Buat project: **threebody**
 
-#### B4) Deploy project “three-body-problem” + Edge Nginx (hit.local)
+**B4) Deploy project “three-body-problem” + Edge Nginx (hit.local)**
 
 ```bash
 cd ~
@@ -236,7 +238,7 @@ mkdir -p ~/three-body-problem/deploy/k8s
 mkdir -p deploy/k8s/base deploy/k8s/jobs
 ```
 
-#### Setup Konfigurasi
+**Setup Konfigurasi**
 
 Buat file edge.conf
 
@@ -309,21 +311,6 @@ services:
 networks:
   edge-net:
     name: edge-net
-```
-
-Buat file 00-namespace.yaml
-
-```bash
-nano deploy/k8s/base/00-namespace.yaml
-```
-
-isi file diatas dengan konfig dibawah ini
-
-```bash
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: threebody-prod
 ```
 
 Buat file 10-mysql.yaml
@@ -535,7 +522,6 @@ spec:
                 secretKeyRef:
                   name: app-secrets
                   key: MYSQL_PASSWORD
-
 ```
 
 Buat file 30-laravel.yaml
@@ -861,7 +847,7 @@ spec:
                   key: MYSQL_PASSWORD
 ```
 
-#### ✅ ADD-ON: Buat file monitoring di repo (WAJIB untuk job `monitoring_install`)
+**✅ ADD-ON: Buat file monitoring di repo (WAJIB untuk job `monitoring_install`)**
 
 ```bash
 cd ~/three-body-problem
@@ -1003,21 +989,9 @@ spec:
       nodePort: 30100
 EOF
 
+
 echo "=== CEK file monitoring ==="
 ls -lah deploy/monitoring
-```
-
-Buat file frontend/.env.production
-
-```bash
-nano ~/three-body-problem/frontend/.env.production
-```
-
-Isi file diatas dengan konfig dibawah ini
-
-```bash
-REACT_APP_GO_API_BASE=/go
-REACT_APP_LARAVEL_API_BASE=/laravel
 ```
 
 Buat file frontend/.dockerignore
@@ -1029,10 +1003,13 @@ nano ~/three-body-problem/frontend/.dockerignore
 Isi file diatas dengan konfig dibawah ini
 
 ```bash
+.git
+.gitignore
 node_modules
 build
-npm-debug.log
-.DS_Store
+*.log
+.env
+.env.*
 ```
 
 Buat file go/.dockerignore
@@ -1044,12 +1021,15 @@ nano ~/three-body-problem/go/.dockerignore
 Isi file diatas dengan konfig dibawah ini
 
 ```bash
+.git
+.gitignore
+
+# local
+.env
+
+# build artifacts
 bin
-vendor
 *.log
-.DS_Store
-tmp
-**/*.test
 ```
 
 Buat file laravel/.dockerignore
@@ -1061,16 +1041,17 @@ nano ~/three-body-problem/laravel/.dockerignore
 Isi file diatas dengan konfig dibawah ini
 
 ```bash
-/vendor
-/node_modules
-/storage/*.key
-/storage/logs
-/storage/framework/cache
-/storage/framework/sessions
-/storage/framework/views
-bootstrap/cache
+.git
+vendor
+node_modules
+tests
+storage/logs
+storage/framework/cache
+storage/framework/sessions
+storage/framework/views
 .env
-.DS_Store
+.env.*
+Dockerfile
 ```
 
 Buat file frontend/Dockerfile
@@ -1082,17 +1063,25 @@ nano ~/three-body-problem/frontend/Dockerfile
 Isi file diatas dengan konfig dibawah ini
 
 ```bash
-FROM node:18-alpine AS build
+FROM node:20 AS build
 WORKDIR /app
+
 COPY package*.json ./
-RUN npm install
+RUN npm ci
+
 COPY . .
+
+ARG REACT_APP_GO_API_BASE=/go
+ARG REACT_APP_LARAVEL_API_BASE=/laravel
+
+ENV REACT_APP_GO_API_BASE=$REACT_APP_GO_API_BASE
+ENV REACT_APP_LARAVEL_API_BASE=$REACT_APP_LARAVEL_API_BASE
+
 RUN npm run build
 
 FROM nginx:alpine
 COPY --from=build /app/build /usr/share/nginx/html
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
 ```
 
 Buat file go/Dockerfile
@@ -1104,18 +1093,20 @@ nano ~/three-body-problem/go/Dockerfile
 Isi file diatas dengan konfig dibawah ini
 
 ```bash
-FROM golang:1.21-alpine AS build
+# ---- build stage ----
+FROM golang:1.22 AS builder
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
 COPY . .
-RUN go build -o server .
+RUN go mod download
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o server .
 
-FROM alpine:3.18
-WORKDIR /app
-COPY --from=build /app/server /app/server
+# ---- runtime stage ----
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /app/server /server
+USER nonroot:nonroot
 EXPOSE 8080
-CMD ["/app/server"]
+ENTRYPOINT ["/server"]
 ```
 
 Buat file laravel/Dockerfile
@@ -1127,33 +1118,65 @@ nano ~/three-body-problem/laravel/Dockerfile
 Isi file diatas dengan konfig dibawah ini
 
 ```bash
-FROM php:8.2-fpm
+# -------- Base runtime (PHP-FPM Alpine + extensions) --------
+FROM php:8.2-fpm-alpine AS base
 
-RUN apt-get update && apt-get install -y \
-    git curl libpng-dev libonig-dev libxml2-dev zip unzip \
- && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd \
- && rm -rf /var/lib/apt/lists/*
+# runtime libs dulu
+RUN apk add --no-cache \
+    icu-libs \
+    libzip \
+    oniguruma \
+    freetype \
+    libjpeg-turbo \
+    libpng
 
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# build deps hanya di stage ini (akan dihapus)
+RUN apk add --no-cache --virtual .build-deps \
+    $PHPIZE_DEPS \
+    icu-dev \
+    libzip-dev \
+    oniguruma-dev \
+    freetype-dev \
+    libjpeg-turbo-dev \
+    libpng-dev
 
-WORKDIR /var/www
-COPY . /var/www
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+ && docker-php-ext-install -j"$(nproc)" pdo_mysql zip intl gd mbstring opcache \
+ && apk del .build-deps
 
-# WAJIB: bikin folder yang dipakai Laravel untuk cache/view compiled
-RUN mkdir -p \
-      /var/www/bootstrap/cache \
-      /var/www/storage/framework/cache \
-      /var/www/storage/framework/sessions \
-      /var/www/storage/framework/views \
-      /var/www/storage/logs \
- && chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache \
- && chmod -R 775 /var/www/storage /var/www/bootstrap/cache
+WORKDIR /var/www/html
 
-# saran production: no-dev biar ga install phpunit dll
-RUN composer install --no-interaction --prefer-dist --no-dev --optimize-autoloader
+# -------- Vendor build (composer) --------
+FROM base AS vendor
+
+RUN apk add --no-cache git unzip
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+COPY . /var/www/html
+
+RUN set -eux; \
+  composer install \
+    --no-dev \
+    --prefer-dist \
+    --no-interaction \
+    --no-progress \
+    --optimize-autoloader \
+    --classmap-authoritative; \
+  composer clear-cache; \
+  rm -rf /root/.composer/cache || true; \
+  rm -rf tests || true; \
+  rm -rf storage/logs/*.log || true
+
+# -------- Final image --------
+FROM base AS runtime
+
+COPY --from=vendor /var/www/html /var/www/html
+
+RUN chown -R www-data:www-data storage bootstrap/cache || true \
+ && chmod -R ug+rwX storage bootstrap/cache || true
 
 EXPOSE 9000
-CMD ["php-fpm"]
+CMD ["php-fpm", "-F"]
 ```
 
 Edit file frontend/src/App.js
@@ -1164,7 +1187,7 @@ nano ~/three-body-problem/frontend/src/App.js
 
 Isi file diatas dengan konfig dibawah ini
 
-```bash
+```
 import React, { useMemo, useState } from "react";
 import "./App.css";
 
@@ -1437,7 +1460,6 @@ function App() {
 }
 
 export default App;
-
 ```
 
 Buat file .gitignore
@@ -1476,7 +1498,7 @@ nano ~/three-body-problem/.gitlab-ci.yml
 
 isi file diatas dengan konfig dibawah ini
 
-```bash
+```
 stages:
   - build
   - push
@@ -1565,7 +1587,7 @@ deploy:
   stage: deploy
   needs: ["push_images"]
   script: |
-    set -euo pipefail
+    set -e
     echo "==> [deploy] validasi variables"
     : "${KUBECONFIG_PROD:?Missing KUBECONFIG_PROD (GitLab Variables Type: File)}"
     : "${K8S_IMAGEPULL_SECRET:?Missing K8S_IMAGEPULL_SECRET}"
@@ -1588,12 +1610,13 @@ deploy:
 
     echo "==> [deploy] set kubeconfig dari File Variable"
     export KUBECONFIG="$KUBECONFIG_PROD"
+    chmod 600 "$KUBECONFIG" || true
 
     echo "==> [deploy] cek cluster"
     kubectl get nodes -o wide
 
-    echo "==> [deploy] pastikan namespace (declarative, anti warning apply)"
-    kubectl create ns "$K8S_NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+    echo "==> [deploy] pastikan namespace"
+    kubectl get ns "$K8S_NS" >/dev/null 2>&1 || kubectl create ns "$K8S_NS"
 
     echo "==> [deploy][addon] tunggu default serviceaccount ready (anti race)"
     for i in $(seq 1 60); do
@@ -1631,7 +1654,7 @@ deploy:
 
     echo "==> [deploy] attach imagePullSecret ke default serviceaccount (tidak boleh silent)"
     kubectl -n "$K8S_NS" patch serviceaccount default \
-      -p "{\"imagePullSecrets\": [{\"name\": \"$K8S_IMAGEPULL_SECRET\"}]}" >/dev/null 2>&1 || true
+      -p "{\"imagePullSecrets\": [{\"name\": \"$K8S_IMAGEPULL_SECRET\"}]}" >/dev/null
 
     echo "==> [deploy][addon] verifikasi SA default"
     kubectl -n "$K8S_NS" get sa default -o jsonpath='{.imagePullSecrets[*].name}'; echo
@@ -1641,32 +1664,18 @@ deploy:
       exit 1
     )
 
-    echo "==> [deploy] apply manifests"
+    echo "==> [deploy] apply manifests (buat semua resource ada dulu)"
     kubectl apply -f deploy/k8s/base/
 
-    kubectl -n "$K8S_NS" get deploy go laravel -o jsonpath='{range .items[*]}{.metadata.name}={.spec.replicas}{"\n"}{end}'
+    echo "==> [deploy][addon] STOP semua app dulu (mysql harus ready dulu)"
+    kubectl -n "$K8S_NS" scale deployment/frontend --replicas=0 || true
+    kubectl -n "$K8S_NS" scale deployment/laravel --replicas=0 || true
+    kubectl -n "$K8S_NS" scale deployment/go --replicas=0 || true
+    kubectl -n "$K8S_NS" delete pod -l app=frontend --ignore-not-found=true || true
+    kubectl -n "$K8S_NS" delete pod -l app=laravel --ignore-not-found=true || true
+    kubectl -n "$K8S_NS" delete pod -l app=go --ignore-not-found=true || true
 
-    echo "==> [deploy][addon] STOP GO dulu (anti-race create table)"
-    kubectl -n "$K8S_NS" scale deployment/go --replicas=0 >/dev/null 2>&1 || true
-    kubectl -n "$K8S_NS" delete pod -l app=go --ignore-not-found=true >/dev/null 2>&1 || true
-
-    echo "==> [deploy] update image tag ke commit SHA"
-    kubectl -n "$K8S_NS" set image deployment/frontend frontend="$REGISTRY/frontend:$TAG"
-    kubectl -n "$K8S_NS" set image deployment/go go="$REGISTRY/go:$TAG"
-    # IMPORTANT: update container laravel + initContainer copy-app biar code yang dicopy selalu versi commit yang sama
-    kubectl -n "$K8S_NS" set image deployment/laravel laravel="$REGISTRY/laravel:$TAG" copy-app="$REGISTRY/laravel:$TAG"
-
-    echo "==> [deploy] rollout (frontend dulu)"
-    kubectl -n "$K8S_NS" rollout status deployment/frontend --timeout="$K8S_ROLLOUT_TIMEOUT" || (
-      echo "---- DEBUG (frontend rollout gagal) ----"
-      kubectl -n "$K8S_NS" get pods -o wide || true
-      kubectl -n "$K8S_NS" get events --sort-by=.lastTimestamp | tail -n 120 || true
-      kubectl -n "$K8S_NS" describe deploy frontend || true
-      kubectl -n "$K8S_NS" describe pod -l app=frontend || true
-      exit 1
-    )
-
-    echo "==> [deploy][addon] tunggu mysql ready (jangan di-skip)"
+    echo "==> [deploy][addon] tunggu mysql rollout"
     kubectl -n "$K8S_NS" rollout status statefulset/mysql --timeout="$K8S_ROLLOUT_TIMEOUT" || (
       echo "---- DEBUG (mysql rollout gagal) ----"
       kubectl -n "$K8S_NS" get pods -o wide || true
@@ -1698,7 +1707,10 @@ deploy:
       echo "waiting mysql... ($i/60)"
       sleep 2
     done
-    [ "$MYSQL_OK" -eq 1 ] || (echo "ERROR: mysql belum ready" && exit 1)
+    if [ "$MYSQL_OK" -ne 1 ]; then
+      echo "ERROR: mysql belum ready"
+      exit 1
+    fi
 
     echo "==> [deploy][addon] ensure DB + grant user (idempotent)"
     kubectl -n "$K8S_NS" exec -i mysql-0 -c mysql -- \
@@ -1710,34 +1722,39 @@ deploy:
     FLUSH PRIVILEGES;
     SQL
 
+    echo "==> [deploy] update image tag ke commit SHA (setelah mysql siap)"
+    kubectl -n "$K8S_NS" set image deployment/frontend frontend="$REGISTRY/frontend:$TAG"
+    kubectl -n "$K8S_NS" set image deployment/go go="$REGISTRY/go:$TAG"
+    # IMPORTANT: update container laravel + initContainer copy-app biar code yang dicopy selalu versi commit yang sama
+    kubectl -n "$K8S_NS" set image deployment/laravel laravel="$REGISTRY/laravel:$TAG" copy-app="$REGISTRY/laravel:$TAG"
+
     echo "==> [deploy][addon] jalankan migrate job (anti push pertama error)"
     JOB_FILE="deploy/k8s/jobs/laravel-migrate-job.yaml"
 
-    kubectl -n "$K8S_NS" delete job laravel-migrate --ignore-not-found=true >/dev/null 2>&1 || true
-    kubectl -n "$K8S_NS" delete pod -l job-name=laravel-migrate --ignore-not-found=true >/dev/null 2>&1 || true
-    kubectl -n "$K8S_NS" wait --for=delete job/laravel-migrate --timeout=30s >/dev/null 2>&1 || true
+    kubectl -n "$K8S_NS" delete job laravel-migrate --ignore-not-found=true
+    kubectl -n "$K8S_NS" delete pod -l job-name=laravel-migrate --ignore-not-found=true || true
+    kubectl -n "$K8S_NS" wait --for=delete job/laravel-migrate --timeout=30s || true
 
     sed "s|__LARAVEL_IMAGE__|$REGISTRY/laravel:$TAG|g" "$JOB_FILE" \
     | kubectl -n "$K8S_NS" apply -f -
 
-    # FAIL-FAST: kalau job cepat gagal, jangan nunggu 30m
-    if kubectl -n "$K8S_NS" wait --for=condition=failed job/laravel-migrate --timeout=60s >/dev/null 2>&1; then
+    # FAIL-FAST: kalau job cepat gagal, jangan nunggu 10 menit
+    kubectl -n "$K8S_NS" wait --for=condition=failed job/laravel-migrate --timeout=60s && (
       echo "ERROR: migrate job FAILED"
       kubectl -n "$K8S_NS" logs -l job-name=laravel-migrate --all-containers=true --tail=200 || true
       kubectl -n "$K8S_NS" describe job laravel-migrate || true
       exit 1
-    fi
+    ) || true
 
-    if ! kubectl -n "$K8S_NS" wait --for=condition=complete job/laravel-migrate --timeout=30m >/dev/null 2>&1; then
+    kubectl -n "$K8S_NS" wait --for=condition=complete job/laravel-migrate --timeout=30m || (
       echo "ERROR: migrate job gagal / timeout"
       kubectl -n "$K8S_NS" logs -l job-name=laravel-migrate --all-containers=true --tail=200 || true
       kubectl -n "$K8S_NS" describe job laravel-migrate || true
       exit 1
-    fi
+    )
 
     echo "==> [deploy][addon] START LARAVEL setelah migrate sukses"
     kubectl -n "$K8S_NS" scale deployment/laravel --replicas=1
-
     kubectl -n "$K8S_NS" rollout status deployment/laravel --timeout="$K8S_ROLLOUT_TIMEOUT" || (
       echo "---- DEBUG (laravel rollout gagal) ----"
       kubectl -n "$K8S_NS" get pods -o wide || true
@@ -1746,9 +1763,6 @@ deploy:
       kubectl -n "$K8S_NS" describe pod -l app=laravel || true
       exit 1
     )
-
-    echo "==> [deploy][addon] migrate job log (ringkas)"
-    kubectl -n "$K8S_NS" logs -l job-name=laravel-migrate --all-containers=true --tail=200 || true
 
     echo "==> [deploy][addon] START GO setelah migrate sukses"
     kubectl -n "$K8S_NS" scale deployment/go --replicas=1
@@ -1761,6 +1775,20 @@ deploy:
       exit 1
     )
 
+    echo "==> [deploy][addon] START FRONTEND terakhir"
+    kubectl -n "$K8S_NS" scale deployment/frontend --replicas=1
+    kubectl -n "$K8S_NS" rollout status deployment/frontend --timeout="$K8S_ROLLOUT_TIMEOUT" || (
+      echo "---- DEBUG (frontend rollout gagal) ----"
+      kubectl -n "$K8S_NS" get pods -o wide || true
+      kubectl -n "$K8S_NS" get events --sort-by=.lastTimestamp | tail -n 120 || true
+      kubectl -n "$K8S_NS" describe deploy frontend || true
+      kubectl -n "$K8S_NS" describe pod -l app=frontend || true
+      exit 1
+    )
+
+    echo "==> [deploy][addon] migrate job log (ringkas)"
+    kubectl -n "$K8S_NS" logs -l job-name=laravel-migrate --all-containers=true --tail=200 || true
+
     echo "==> [deploy] ringkasan"
     kubectl -n "$K8S_NS" get deploy -o wide
     kubectl -n "$K8S_NS" get svc -o wide
@@ -1768,12 +1796,10 @@ deploy:
 
     echo "==> [deploy] healthcheck (prioritas NodePort, fallback edge hit.local)"
     for i in $(seq 1 60); do
-      # NodePort frontend di vm-worker (sesuai skema kamu: 192.168.56.44)
       if curl -fsSI "http://192.168.56.44:30080/" >/dev/null 2>&1; then
         echo "OK: frontend NodePort sehat"
         exit 0
       fi
-      # fallback: edge nginx di vm-docker (kalau runner shell di host)
       if curl -kfsS --resolve hit.local:443:127.0.0.1 https://hit.local/ >/dev/null 2>&1; then
         echo "OK: hit.local sehat"
         exit 0
@@ -1785,6 +1811,7 @@ deploy:
     kubectl -n "$K8S_NS" get pods -o wide || true
     kubectl -n "$K8S_NS" describe pods || true
     exit 1
+
 
 monitoring_install:
   stage: monitoring
@@ -1852,7 +1879,7 @@ monitoring_install:
       "spec":{"type":"NodePort","ports":[{"name":"http-web","port":9090,"targetPort":9090,"nodePort":30090}]}
     }'
     kubectl -n "$MON_NS" patch svc loki-gateway -p '{
-      "spec":{"type":"NodePort","ports":[{"name":"http","port":80,"targetPort":80,"nodePort":30100}]}
+      "spec":{"type":"NodePort","ports":[{"name":"http","port":80,"targetPort":8080,"nodePort":30100}]}
     }'
 
     echo "==> [monitoring] ringkasan svc"
@@ -1895,7 +1922,7 @@ Tes akses:
 curl -vk --resolve hit.local:443:127.0.0.1 https://hit.local/ 2>&1 | tail -n 20
 ```
 
-#### B5) Install GitLab Runner + pastikan runner bisa docker
+**B5) Install GitLab Runner + pastikan runner bisa docker**
 
 ```bash
 curl -L "https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh" | sudo bash
@@ -1922,7 +1949,7 @@ sudo gitlab-runner register
 * tags: `deploy`
 * untagged: `false`
 
-#### B6) SSH GitLab via port 443 (kalau port 22 bermasalah)
+**B6) SSH GitLab via port 443 (kalau port 22 bermasalah)**
 
 ```bash
 ssh-keygen -t ed25519 -C "vm-docker-gitlab" -f ~/.ssh/id_ed25519 -N ""
@@ -2008,9 +2035,9 @@ sudo systemctl status edge-compose.service --no-pager
 
 ***
 
-### C. VM-K8S (192.168.56.43) — Kubernetes control-plane
+#### C. VM-K8S (192.168.56.43) — Kubernetes control-plane
 
-#### C1) Prasyarat kernel + swap off
+**C1) Prasyarat kernel + swap off**
 
 ```bash
 sudo apt-get update -y
@@ -2049,7 +2076,7 @@ swapon --show
 
 Harus kosong.
 
-#### C2) Install + konfigurasi containerd
+**C2) Install + konfigurasi containerd**
 
 ```bash
 sudo apt-get install -y containerd
@@ -2078,7 +2105,7 @@ sudo grep -n '\\1' /etc/containerd/config.toml || echo "OK: tidak ada \\1"
 sudo grep -nE '\[plugins\."io\.containerd\.grpc\.v1\.cri"\.registry\]|config_path' /etc/containerd/config.toml | head -n 40
 ```
 
-#### C3) Allow Harbor HTTP untuk containerd (pull dari harbor.local:8080)
+**C3) Allow Harbor HTTP untuk containerd (pull dari harbor.local:8080)**
 
 ```bash
 sudo mkdir -p /etc/containerd/certs.d/harbor.local:8080
@@ -2094,7 +2121,7 @@ sudo systemctl restart containerd
 sudo systemctl is-active containerd
 ```
 
-#### C4) Install kubeadm/kubelet/kubectl v1.30
+**C4) Install kubeadm/kubelet/kubectl v1.30**
 
 ```bash
 sudo mkdir -p -m 0755 /etc/apt/keyrings
@@ -2110,7 +2137,7 @@ sudo apt-get install -y kubelet kubeadm kubectl
 sudo apt-mark hold kubelet kubeadm kubectl
 ```
 
-#### C5) `kubeadm init` + Calico
+**C5) `kubeadm init` + Calico**
 
 ```bash
 sudo kubeadm init \
@@ -2144,7 +2171,7 @@ Lakukan di **vm-k8s** dan **vm-worker**.
 
 ***
 
-#### 1) Matikan swap sekarang (langsung hilang tanpa reboot)
+**1) Matikan swap sekarang (langsung hilang tanpa reboot)**
 
 ```bash
 sudo swapoff /swap.img
@@ -2158,7 +2185,7 @@ Kalau sukses, `swapon --show` harus kosong (tidak ada output).
 
 ***
 
-#### 2) Biar swap tidak hidup lagi saat reboot (permanen)
+**2) Biar swap tidak hidup lagi saat reboot (permanen)**
 
 Cek dulu swap dinyalakan dari mana (umumnya dari `/etc/fstab`):
 
@@ -2183,7 +2210,7 @@ sudo systemctl daemon-reload
 
 ***
 
-#### 3) Hapus file swap
+**3) Hapus file swap**
 
 Setelah swap sudah off dan fstab sudah dibereskan:
 
@@ -2201,7 +2228,7 @@ sudo rm -f /swap.img
 
 ***
 
-#### 4) Verifikasi setelah reboot
+**4) Verifikasi setelah reboot**
 
 Reboot VM, lalu cek:
 
@@ -2233,13 +2260,7 @@ curl -fsS "http://192.168.56.43:3100/loki/api/v1/status/buildinfo" | head
 
 ***
 
-#### C6.10) Cara lihat monitoring & log (pemula)
-
-**Grafana UI**
-
-* URL: `http://192.168.56.43:3000`
-* user: `admin`
-* password: dari secret `kps-grafana`
+**C6.10) Cara lihat monitoring & log (pemula)**
 
 **Dashboard contoh:**
 
@@ -2258,13 +2279,13 @@ curl -fsS "http://192.168.56.43:3100/loki/api/v1/status/buildinfo" | head
 
 ***
 
-#### C6.11) Catatan penting (biar nggak kaget)
+**C6.11) Catatan penting (biar nggak kaget)**
 
 * Loki ini **tanpa PVC** (pakai `emptyDir`) → log bisa hilang kalau pod Loki restart. Untuk lab ini aman & ringan.
 
 ***
 
-### ✅ Setelah C6 selesai, baru lanjut ke tahap D (vm-worker) dan E (Push pertama)
+#### ✅ Setelah C6 selesai, baru lanjut ke tahap D (vm-worker) dan E (Push pertama)
 
 Karena kamu minta “push pertama tidak ada error”, setelah monitoring selesai dan sebelum E2, aku sarankan kamu tetap jalankan gate yang sudah ada di runbook kamu:
 
@@ -2274,9 +2295,9 @@ Karena kamu minta “push pertama tidak ada error”, setelah monitoring selesai
 
 ***
 
-### D. VM-WORKER (192.168.56.44) — Kubernetes worker + NodePort
+#### D. VM-WORKER (192.168.56.44) — Kubernetes worker + NodePort
 
-#### D1) Ulangi langkah containerd yang SAMA seperti vm-k8s
+**D1) Ulangi langkah containerd yang SAMA seperti vm-k8s**
 
 Jalankan di vm-worker: **C1 + C2 + C3 + C4** (swap off, sysctl, containerd safe config, hosts.toml Harbor, install kubeadm/kubelet/kubectl).
 
@@ -2294,7 +2315,7 @@ swapon --show
 
 Harus kosong.
 
-#### D2) Join cluster
+**D2) Join cluster**
 
 Pakai command dari vm-k8s, contoh:
 
@@ -2308,7 +2329,7 @@ Cek dari vm-k8s:
 kubectl get nodes -o wide
 ```
 
-#### D3) Siapkan hostPath MySQL (sesuai manifest kamu)
+**D3) Siapkan hostPath MySQL (sesuai manifest kamu)**
 
 Karena PV kamu pakai:
 
@@ -2323,7 +2344,7 @@ sudo chown -R 999:999 /data/threebody/mysql || true
 sudo chmod 700 /data/threebody/mysql || true
 ```
 
-#### D4) Firewall (biar NodePort bisa diakses dari vm-docker)
+**D4) Firewall (biar NodePort bisa diakses dari vm-docker)**
 
 Untuk lab paling simpel: **matikan ufw** di vm-worker & vm-k8s:
 
@@ -2351,7 +2372,7 @@ Lakukan di **vm-k8s** dan **vm-worker**.
 
 ***
 
-#### 1) Matikan swap sekarang (langsung hilang tanpa reboot)
+**1) Matikan swap sekarang (langsung hilang tanpa reboot)**
 
 ```bash
 sudo swapoff /swap.img
@@ -2365,7 +2386,7 @@ Kalau sukses, `swapon --show` harus kosong (tidak ada output).
 
 ***
 
-#### 2) Biar swap tidak hidup lagi saat reboot (permanen)
+**2) Biar swap tidak hidup lagi saat reboot (permanen)**
 
 Cek dulu swap dinyalakan dari mana (umumnya dari `/etc/fstab`):
 
@@ -2390,7 +2411,7 @@ sudo systemctl daemon-reload
 
 ***
 
-#### 3) Hapus file swap
+**3) Hapus file swap**
 
 Setelah swap sudah off dan fstab sudah dibereskan:
 
@@ -2408,7 +2429,7 @@ sudo rm -f /swap.img
 
 ***
 
-#### 4) Verifikasi setelah reboot
+**4) Verifikasi setelah reboot**
 
 Reboot VM, lalu cek:
 
@@ -2421,9 +2442,9 @@ Harus tidak ada `/swap.img` dan Swap total idealnya `0`.
 
 ***
 
-### E. GITLAB CI/CD
+#### E. GITLAB CI/CD
 
-#### E1) GitLab Variables (Project → Settings → CI/CD → Variables)
+**E1) GitLab Variables (Project → Settings → CI/CD → Variables)**
 
 Wajib:
 
@@ -2446,7 +2467,7 @@ Upload file itu ke variable `KUBECONFIG_PROD` (Type: File).
 
 ***
 
-#### E2) Push pertama
+**E2) Push pertama**
 
 Di vm-docker (repo sudah ada):
 
@@ -2454,13 +2475,13 @@ Di vm-docker (repo sudah ada):
 cd ~/three-body-problem
 
 git init
-git config --global init.defaultBranch main
 git config --global user.name "cikalfarid"
-git config --global user.email "cikalfarid@users.noreply.gitlab.com"
+git config --global user.email "cikalfarid@gmail.com"
+git config --global init.defaultBranch main
 git branch -M main
 
 git remote remove origin 2>/dev/null || true
-git remote add origin git@gitlab-443:cikalfarid/three-body-problem.git
+git remote add origin git@gitlab-443:cikalfarid/three-body-problem-lab.git
 git remote -v
 
 git add -A
@@ -2496,7 +2517,7 @@ git push gitlab main
 
 ***
 
-### F. Setelah deploy sukses (sekali saja): migrate/seed
+#### F. Setelah deploy sukses (sekali saja): migrate/seed
 
 Di vm-k8s:
 
@@ -2536,7 +2557,7 @@ kubectl -n "$NS" exec -it "$LARAVEL_POD" -- php artisan migrate:fresh --seed --f
 
 ***
 
-#### ✅ ADD-ON: “3 VM Restart → Harbor & hit.local harus auto pulih”
+**✅ ADD-ON: “3 VM Restart → Harbor & hit.local harus auto pulih”**
 
 Ini yang bikin stabil saat laptop kamu dimatikan/VM restart.
 
@@ -2592,7 +2613,7 @@ kubectl -n threebody-prod get pods -o wide
 
 ***
 
-#### ✅ 1. CI/CD menggunakan GitLab CI
+**✅ 1. CI/CD menggunakan GitLab CI**
 
 **Status: TERPENUHI**
 
@@ -2616,7 +2637,7 @@ kubectl -n threebody-prod get pods -o wide
 
 ***
 
-#### ✅ 2. Pipeline meliputi build, deploy, health check, post-deployment
+**✅ 2. Pipeline meliputi build, deploy, health check, post-deployment**
 
 **Status: TERPENUHI**
 
@@ -2658,7 +2679,7 @@ kubectl -n threebody-prod get pods -o wide
 
 ***
 
-#### ✅ 3. Secret Manager (GitLab Variables)
+**✅ 3. Secret Manager (GitLab Variables)**
 
 **Status: TERPENUHI**
 
@@ -2673,7 +2694,7 @@ Kamu sudah menggunakan **GitLab CI/CD Variables**, bukan hardcode:
 
 ***
 
-#### ✅ 4. Rate limiting & HTTPS
+**✅ 4. Rate limiting & HTTPS**
 
 **Status: TERPENUHI**
 
@@ -2692,7 +2713,7 @@ Kamu sudah menggunakan **GitLab CI/CD Variables**, bukan hardcode:
 
 ***
 
-#### ✅ 5. Image di Harbor + multistage build
+**✅ 5. Image di Harbor + multistage build**
 
 **Status: TERPENUHI**
 
@@ -2710,7 +2731,7 @@ Catatan penting:
 
 ***
 
-#### ✅ 6. Logging Service & utilitas server (Grafana)&#x20;
+**✅ 6. Logging Service & utilitas server (Grafana)**
 
 ✔ Requirement ini **belum kamu kerjakan**\
 ✔ Dan **itu BENAR**, karena:
