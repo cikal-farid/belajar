@@ -6,3 +6,4 @@
 * [Monitoring di pipeline](monitoring-di-pipeline.md)
 * [hal ganjel](hal-ganjel.md)
 * [Penjelasan runbook](penjelasan-runbook.md)
+* [Bersih-bersih kuber](bersih-bersih-kuber.md)
