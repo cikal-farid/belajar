@@ -1187,7 +1187,7 @@ nano ~/three-body-problem/frontend/src/App.js
 
 Isi file diatas dengan konfig dibawah ini
 
-```
+```bash
 import React, { useMemo, useState } from "react";
 import "./App.css";
 
@@ -1498,7 +1498,7 @@ nano ~/three-body-problem/.gitlab-ci.yml
 
 isi file diatas dengan konfig dibawah ini
 
-```
+```bash
 stages:
   - build
   - push
