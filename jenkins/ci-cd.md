@@ -46,7 +46,7 @@ wget https://get.jenkins.io/war-stable/2.528.2/jenkins.war
 ufw allow 9090
 ```
 
-<figure><img src="../.gitbook/assets/image (21).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (21) (1).png" alt=""><figcaption></figcaption></figure>
 
 5. Tambahkan dibawah ini agar Github dapat berjalan dengan baik
 
@@ -72,7 +72,7 @@ chmod 644 ~/.ssh/id_rsa.pub
 ssh -T git@github.com
 ```
 
-<figure><img src="../.gitbook/assets/image.png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (26).png" alt=""><figcaption></figcaption></figure>
 
 6. Kemudian jalankan jenkins.war dengan menggunakan perintah dibawah ini
 
@@ -110,7 +110,7 @@ http://192.168.56.41:9090/
 
 8. Tampilan pertama kali akses jenkins akan seperti gambar dibawah ini
 
-<figure><img src="../.gitbook/assets/image (11).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (11) (1).png" alt=""><figcaption></figcaption></figure>
 
 Isi kan Administrator password dengan melihat isi file dari /root/.jenkins/secrets/initialAdminPassword dan lanjut klik Continue
 
@@ -118,15 +118,15 @@ Isi kan Administrator password dengan melihat isi file dari /root/.jenkins/secre
 cat /root/.jenkins/secrets/initialAdminPassword
 ```
 
-<figure><img src="../.gitbook/assets/image (12).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (12) (1).png" alt=""><figcaption></figcaption></figure>
 
 9. Tampilan awal login seperti gambar dibawah ini dan karena saya tidak ingin menginstall plugin apapun maka perhatikan seperti di gambar
 
-<figure><img src="../.gitbook/assets/image (13).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (13) (1).png" alt=""><figcaption></figcaption></figure>
 
 10. Disini pilih None dan Install
 
-<figure><img src="../.gitbook/assets/image (16).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (16) (1).png" alt=""><figcaption></figcaption></figure>
 
 11. Isi kan data Admin User seperti gambar dibawah ini dan Save continue
 
@@ -154,7 +154,7 @@ Full Name
 cikal farid
 ```
 
-<figure><img src="../.gitbook/assets/image (17).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (17) (1).png" alt=""><figcaption></figcaption></figure>
 
 12. Isi Jenkins URL dan Continue
 
@@ -162,15 +162,15 @@ cikal farid
 http://192.168.56.41:9090/
 ```
 
-<figure><img src="../.gitbook/assets/image (18).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (18) (1).png" alt=""><figcaption></figcaption></figure>
 
 13. Terakhir klik Start Using Jenkins
 
-<figure><img src="../.gitbook/assets/image (19).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (19) (1).png" alt=""><figcaption></figcaption></figure>
 
 14. Tampilan Jenkins
 
-<figure><img src="../.gitbook/assets/image (20).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (20) (1).png" alt=""><figcaption></figcaption></figure>
 
 15. Disini saya akan setup SSH Public Key Server ke Github, jika belum ada jalankan perintah dibawah ini
 16. Generate SSH key pair di Ubuntu
@@ -179,7 +179,7 @@ http://192.168.56.41:9090/
 ssh-keygen -t rsa -b 4096
 ```
 
-<figure><img src="../.gitbook/assets/image (22).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (22) (1).png" alt=""><figcaption></figcaption></figure>
 
 Setelah perintah dijalankan kita akan memasukkan beberapa kondisi dan disini saya pilih enter saja
 
@@ -195,19 +195,19 @@ Karena ini tutorial saya paste disini isi didalam file id\_rsa.pub nya (jangan s
 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCzjpx+OvpnedQfEbXu6A84tuOUw4LLc+wG+mytphUdsBKZ23oWi9Xuipgs6E0ftDaRrW8qKkmpP/Aay3QC4qzzxptV4lO+TX8ybBCePijnXkNEnlq/jDBv/+ybJOwcYO+AJTeZJP5XNtAtePV5l9R4ZpKmOEG6JdVhxvBO/+eBHt+kUizjI0Iw0FXqs9+Y2VoJtq3mde6QjAI1/Z6uGKEtAcb6AfYln1H/ENrGbVHSk+7fSBnLiccS8touqgWPMqz9mHJ1jkG/bgFFTXRkZRNXP2QiGCnx2Xla/PtpUM/vxoqePxfXwfFeD75vT7/JNw5IsYyEXpgdAdsdym5W/wKX0CAWB0/JEkEm6y70/6N+duiAw71r+clRC0AbK/YrcdE6y30X8VtEl4mpsVYDUwxJllcZRmoBduo2XYaO7DTTz9J7hP897Sv6xN6cxwyf9fmHcZOaCXkyrxo1P4nfzsNMy/mlipwpfjW46qYXajZL5kUFhY7o6bPJOE5wSjK4BFuAonJj2lc1E7HkiCeX+8JrlpLoOY7Wi0Ck6dyTGCcpU+Lm+FJADTzqKWtTmxhSuvYc9CfEZvQMYlv50/kAVt1RciqOwDqE+g208syLujeyREYx4CxmlsiOcHtLnwQ1iEzM5X/9LprkNJSbub2eB1WeGigBl4824L3J+IpKvd1xow== root@cinosta
 ```
 
-<figure><img src="../.gitbook/assets/image (23).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (23) (1).png" alt=""><figcaption></figcaption></figure>
 
 18. Login Github dan klik Profile dan masuk ke menu Settings dan klik SSH and GPG Keys
 
-<figure><img src="../.gitbook/assets/image (24).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (24) (1).png" alt=""><figcaption></figcaption></figure>
 
 19. Kemudian klik New SSH Key
 
-<figure><img src="../.gitbook/assets/image (25).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (25) (1).png" alt=""><figcaption></figcaption></figure>
 
 20. Isi Title dan Key yang sebelumnya kita generate di server dan salin serta pindahkan seperti gambar dibawah ini, kemudian klik Add SSH key
 
-<figure><img src="../.gitbook/assets/image (26).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (26) (1).png" alt=""><figcaption></figcaption></figure>
 
 21. Menambahkan Credential SSH di Jenkins dengan cara menyalin terlebih dahulu isi dari file id\_rsa (private key)
 
@@ -285,19 +285,19 @@ H5a7SIIVt1MAAAAMcm9vdEBjaW5vc3RhAQIDBAUGBw==
 
 25. Klik Global
 
-<figure><img src="../.gitbook/assets/image (2).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (2) (1).png" alt=""><figcaption></figcaption></figure>
 
 26. Klik Add Credential
 
-<figure><img src="../.gitbook/assets/image (3).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (3) (1).png" alt=""><figcaption></figcaption></figure>
 
 27. Pilih SSH Username
 
-<figure><img src="../.gitbook/assets/image (4).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (4) (1).png" alt=""><figcaption></figcaption></figure>
 
 28. Isi data seperti di gambar lalu Create
 
-<figure><img src="../.gitbook/assets/image (5).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (5) (1).png" alt=""><figcaption></figcaption></figure>
 
 Note :&#x20;
 
@@ -319,7 +319,7 @@ Note :&#x20;
 
 Install Plugin Pipeline dan Restart Jenkins
 
-<figure><img src="../.gitbook/assets/image (6).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (6) (1).png" alt=""><figcaption></figcaption></figure>
 
 
 
@@ -331,7 +331,7 @@ Kita mulai membuat job di jenkins dengan pipeline juga dari sini sudah dimulai C
 
 Klik Create a Job
 
-<figure><img src="../.gitbook/assets/image (7).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (7) (1).png" alt=""><figcaption></figcaption></figure>
 
 
 
@@ -343,9 +343,9 @@ Menggunakan Post Build Action
 
 Install Slack notification
 
-<figure><img src="../.gitbook/assets/image (9).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (9) (1).png" alt=""><figcaption></figcaption></figure>
 
-<figure><img src="../.gitbook/assets/image (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 Jika menggunakan VPS dan menemukan error pada tampilan jenkins seperti teks dibawah ini
 
@@ -353,7 +353,7 @@ Jika menggunakan VPS dan menemukan error pada tampilan jenkins seperti teks diba
 
 Maka untuk memperbaikinya kita masuk security dan enable proxy compabilitynya seperti gambar dibawah ini
 
-<figure><img src="../.gitbook/assets/image (8).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (8) (1).png" alt=""><figcaption></figcaption></figure>
 
 
 
