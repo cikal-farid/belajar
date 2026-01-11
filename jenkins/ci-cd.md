@@ -285,11 +285,11 @@ H5a7SIIVt1MAAAAMcm9vdEBjaW5vc3RhAQIDBAUGBw==
 
 25. Klik Global
 
-<figure><img src="../.gitbook/assets/image (2) (1) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (2) (1) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 26. Klik Add Credential
 
-<figure><img src="../.gitbook/assets/image (3) (1) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (3) (1) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 27. Pilih SSH Username
 
@@ -345,7 +345,7 @@ Install Slack notification
 
 <figure><img src="../.gitbook/assets/image (9) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
-<figure><img src="../.gitbook/assets/image (1) (1) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (1) (1) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 Jika menggunakan VPS dan menemukan error pada tampilan jenkins seperti teks dibawah ini
 

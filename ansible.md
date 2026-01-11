@@ -45,7 +45,7 @@ Jalankan di VM 19
 ping -c 2 192.168.56.20
 ```
 
-<figure><img src=".gitbook/assets/image.png" alt=""><figcaption></figcaption></figure>
+<figure><img src=".gitbook/assets/image (3).png" alt=""><figcaption></figcaption></figure>
 
 Tes SSH (ganti `<user_vm>` sesuai user di VM .20, misal `cikal`):
 
@@ -53,7 +53,7 @@ Tes SSH (ganti `<user_vm>` sesuai user di VM .20, misal `cikal`):
 ssh cikal@192.168.56.20 "hostname && whoami"
 ```
 
-<figure><img src=".gitbook/assets/image (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src=".gitbook/assets/image (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 Kalau belum ada SSH server di `.20`, di VM `.20` install:
 
@@ -72,7 +72,7 @@ sudo apt install -y ansible
 ansible --version
 ```
 
-<figure><img src=".gitbook/assets/image (2).png" alt=""><figcaption></figcaption></figure>
+<figure><img src=".gitbook/assets/image (2) (1).png" alt=""><figcaption></figcaption></figure>
 
 Tunggu sampai proses selesai.
 
@@ -86,7 +86,7 @@ Buat SSH key di `.19` (kalau belum ada):
 ssh-keygen -t ed25519 -C "ansible"
 ```
 
-<figure><img src=".gitbook/assets/image (3).png" alt=""><figcaption></figcaption></figure>
+<figure><img src=".gitbook/assets/image (3) (1).png" alt=""><figcaption></figcaption></figure>
 
 Tekan **Enter** terus sampai selesai.
 

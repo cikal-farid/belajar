@@ -19,7 +19,7 @@ export DB_PASS="zabbix"
 export PHP_TZ="Asia/Jakarta"
 ```
 
-<figure><img src="../.gitbook/assets/image (1) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (1) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -30,7 +30,7 @@ sudo apt update && sudo apt -y upgrade
 sudo timedatectl set-timezone "$PHP_TZ"
 ```
 
-<figure><img src="../.gitbook/assets/image (2) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (2) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 Tunggu sampai proses selesai
 
@@ -53,7 +53,7 @@ sudo dpkg -i zabbix-release.deb
 sudo apt update
 ```
 
-<figure><img src="../.gitbook/assets/image (3) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (3) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 Tunggu sampai proses selesai
 
