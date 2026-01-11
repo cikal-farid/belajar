@@ -65,6 +65,7 @@
   * [PRTG Administrator](prtg/prtg-administrator.md)
 * [Zabbix](zabbix/README.md)
   * [Install Zabbix](zabbix/install-zabbix.md)
+* [Ansible](ansible.md)
 * [Jenkins](jenkins/README.md)
   * [Membuat Service Jenkins](jenkins/membuat-service-jenkins.md)
   * [CI / CD](jenkins/ci-cd.md)
