@@ -46,7 +46,7 @@ ping -c 2 192.168.56.20
 Tes SSH (ganti `<user_vm>` sesuai user di VM .20, misal `cikal`):
 
 ```bash
-ssh <user_vm>@192.168.56.20 "hostname && whoami"
+ssh cikal@192.168.56.20 "hostname && whoami"
 ```
 
 Kalau belum ada SSH server di `.20`, di VM `.20` install:
@@ -81,13 +81,13 @@ Tekan **Enter** terus sampai selesai.
 Copy key ke `.20`:
 
 ```bash
-ssh-copy-id <user_vm>@192.168.56.20
+ssh-copy-id cikal@192.168.56.20
 ```
 
 Tes login tanpa password:
 
 ```bash
-ssh <user_vm>@192.168.56.20 "echo OK"
+ssh cikal@192.168.56.20 "echo OK"
 ```
 
 ***
@@ -116,7 +116,7 @@ Isi seperti ini (ganti `<user_vm>`):
 192.168.56.20
 
 [nginx_target:vars]
-ansible_user=<user_vm>
+ansible_user=cikal
 ansible_become=true
 ansible_become_method=sudo
 ```
@@ -233,7 +233,7 @@ Harusnya muncul HTML dengan teks “OK - Nginx managed by Ansible”.
 Pastikan `ssh-copy-id` berhasil dan kamu bisa:
 
 ```bash
-ssh <user_vm>@192.168.56.20 "echo OK"
+ssh cikal@192.168.56.20 "echo OK"
 ```
 
 #### B) Sudo minta password saat Ansible jalan
@@ -253,5 +253,3 @@ ansible -i inventory/hosts.ini nginx_target -b -m shell -a "systemctl status ngi
 ```
 
 ***
-
-Kalau kamu kasih tahu **username yang kamu pakai untuk SSH ke VM 192.168.56.20** (misalnya `cikal` atau `ubuntu`), aku bisa tuliskan inventory final-nya tanpa placeholder biar tinggal copy-paste.
