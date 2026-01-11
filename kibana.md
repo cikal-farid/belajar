@@ -92,43 +92,89 @@ sudo apt-get install -y elasticsearch
 
 ### 2.2 Konfigurasi Elasticsearch (mode lab, tanpa password)
 
-Edit config:
+### 1) Stop Elasticsearch dulu (biar aman)
 
 ```bash
-sudo nano /etc/elasticsearch/elasticsearch.yml
+sudo systemctl stop elasticsearch
 ```
 
-Isi minimal (boleh tempel di bawah, yang penting key ini ada):
+***
 
-```yaml
+### 2) Backup file lama (dengan timestamp)
+
+```bash
+sudo cp -a /etc/elasticsearch/elasticsearch.yml /etc/elasticsearch/elasticsearch.yml.$(date +%F_%H%M%S).bak
+```
+
+Cek backup-nya ada:
+
+```bash
+ls -lh /etc/elasticsearch/elasticsearch.yml*.bak
+```
+
+***
+
+### 3) Full replace `elasticsearch.yml` (copy–paste langsung)
+
+> Ini akan menimpa total isi file jadi minimal & rapi untuk single-node.
+
+```bash
+sudo tee /etc/elasticsearch/elasticsearch.yml >/dev/null <<'EOF'
+# Elasticsearch (VM1: 192.168.56.21) - single-node lab config for 2-VM ELK
+# VM1: Elasticsearch + Kibana
+# VM2: Logstash + Filebeat -> send to Elasticsearch
+
+cluster.name: elk-lab
+node.name: vm-elk
+
+path.data: /var/lib/elasticsearch
+path.logs: /var/log/elasticsearch
+
 network.host: 0.0.0.0
 http.port: 9200
+
 discovery.type: single-node
 
-# mode lab (tanpa auth/TLS) – lebih mirip runbook sederhana
+# LAB ONLY: disable security + TLS to keep curl/http simple
 xpack.security.enabled: false
 xpack.security.enrollment.enabled: false
 xpack.security.http.ssl.enabled: false
 xpack.security.transport.ssl.enabled: false
+EOF
 ```
 
-Start + enable:
+***
+
+### 4) (Opsional tapi recommended) Beresin keystore yang nyangkut secure\_password
+
+Karena error kamu spesifik menyebut secure\_password di keystore, ini bagus dibersihin biar tidak “nyangkut” lagi:
+
+```bash
+sudo /usr/share/elasticsearch/bin/elasticsearch-keystore remove xpack.security.transport.ssl.keystore.secure_password 2>/dev/null || true
+sudo /usr/share/elasticsearch/bin/elasticsearch-keystore remove xpack.security.transport.ssl.truststore.secure_password 2>/dev/null || true
+sudo /usr/share/elasticsearch/bin/elasticsearch-keystore remove xpack.security.http.ssl.keystore.secure_password 2>/dev/null || true
+```
+
+***
+
+### 5) Start ulang + cek status
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now elasticsearch
+sudo systemctl status elasticsearch --no-pager -l
 ```
 
-Cek service:
-
-```bash
-sudo systemctl status elasticsearch --no-pager
-```
-
-Cek Elasticsearch hidup:
+Tes respon:
 
 ```bash
 curl http://localhost:9200
+```
+
+Kalau masih gagal, ambil 80 baris log terakhir:
+
+```bash
+sudo journalctl -u elasticsearch -n 80 --no-pager
 ```
 
 ### 2.3 Firewall (VM1)
