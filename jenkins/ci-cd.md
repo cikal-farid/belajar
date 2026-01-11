@@ -110,7 +110,7 @@ http://192.168.56.41:9090/
 
 8. Tampilan pertama kali akses jenkins akan seperti gambar dibawah ini
 
-<figure><img src="../.gitbook/assets/image (11) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (11) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 Isi kan Administrator password dengan melihat isi file dari /root/.jenkins/secrets/initialAdminPassword dan lanjut klik Continue
 
@@ -118,11 +118,11 @@ Isi kan Administrator password dengan melihat isi file dari /root/.jenkins/secre
 cat /root/.jenkins/secrets/initialAdminPassword
 ```
 
-<figure><img src="../.gitbook/assets/image (12) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (12) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 9. Tampilan awal login seperti gambar dibawah ini dan karena saya tidak ingin menginstall plugin apapun maka perhatikan seperti di gambar
 
-<figure><img src="../.gitbook/assets/image (13) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (13) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 10. Disini pilih None dan Install
 
@@ -285,19 +285,19 @@ H5a7SIIVt1MAAAAMcm9vdEBjaW5vc3RhAQIDBAUGBw==
 
 25. Klik Global
 
-<figure><img src="../.gitbook/assets/image (2) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (2) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 26. Klik Add Credential
 
-<figure><img src="../.gitbook/assets/image (3) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (3) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 27. Pilih SSH Username
 
-<figure><img src="../.gitbook/assets/image (4) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (4) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 28. Isi data seperti di gambar lalu Create
 
-<figure><img src="../.gitbook/assets/image (5) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (5) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 Note :&#x20;
 
@@ -319,7 +319,7 @@ Note :&#x20;
 
 Install Plugin Pipeline dan Restart Jenkins
 
-<figure><img src="../.gitbook/assets/image (6) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (6) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 
 
@@ -331,7 +331,7 @@ Kita mulai membuat job di jenkins dengan pipeline juga dari sini sudah dimulai C
 
 Klik Create a Job
 
-<figure><img src="../.gitbook/assets/image (7) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (7) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 
 
@@ -343,9 +343,9 @@ Menggunakan Post Build Action
 
 Install Slack notification
 
-<figure><img src="../.gitbook/assets/image (9) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (9) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
-<figure><img src="../.gitbook/assets/image (1) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (1) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 Jika menggunakan VPS dan menemukan error pada tampilan jenkins seperti teks dibawah ini
 
@@ -353,7 +353,7 @@ Jika menggunakan VPS dan menemukan error pada tampilan jenkins seperti teks diba
 
 Maka untuk memperbaikinya kita masuk security dan enable proxy compabilitynya seperti gambar dibawah ini
 
-<figure><img src="../.gitbook/assets/image (8) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (8) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 
 

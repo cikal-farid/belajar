@@ -19,7 +19,7 @@ export DB_PASS="zabbix"
 export PHP_TZ="Asia/Jakarta"
 ```
 
-<figure><img src="../.gitbook/assets/image (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -30,7 +30,7 @@ sudo apt update && sudo apt -y upgrade
 sudo timedatectl set-timezone "$PHP_TZ"
 ```
 
-<figure><img src="../.gitbook/assets/image (2).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (2) (1).png" alt=""><figcaption></figcaption></figure>
 
 Tunggu sampai proses selesai
 
@@ -53,7 +53,7 @@ sudo dpkg -i zabbix-release.deb
 sudo apt update
 ```
 
-<figure><img src="../.gitbook/assets/image (3).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (3) (1).png" alt=""><figcaption></figcaption></figure>
 
 Tunggu sampai proses selesai
 
@@ -65,7 +65,7 @@ sudo apt install -y apache2 mariadb-server \
   zabbix-agent
 ```
 
-<figure><img src="../.gitbook/assets/image (4).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (4) (1).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -83,7 +83,7 @@ FLUSH PRIVILEGES;
 SQL
 ```
 
-<figure><img src="../.gitbook/assets/image (5).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (5) (1).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -94,7 +94,7 @@ zcat /usr/share/zabbix/sql-scripts/mysql/server.sql.gz \
  | mysql --default-character-set=utf8mb4 -u"${DB_USER}" -p"${DB_PASS}" "${DB_NAME}"
 ```
 
-<figure><img src="../.gitbook/assets/image (6).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (6) (1).png" alt=""><figcaption></figcaption></figure>
 
 Tunggu sampai proses selesai
 
@@ -104,7 +104,7 @@ Balikin setting `log_bin_trust_function_creators` (opsional tapi rapi):
 sudo mysql -e "SET GLOBAL log_bin_trust_function_creators = 0;"
 ```
 
-<figure><img src="../.gitbook/assets/image (7).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (7) (1).png" alt=""><figcaption></figcaption></figure>
 
 (Alasan setting ini dibutuhkan saat import schema dijelaskan di dokumentasi Zabbix.) ([zabbix.com](https://www.zabbix.com/documentation/current/en/manual/appendix/install/db_scripts?utm_source=chatgpt.com))
 
@@ -137,7 +137,7 @@ grep -q "^date.timezone" "$PHPINI" || echo "date.timezone = ${PHP_TZ}" | sudo te
 sudo systemctl restart apache2
 ```
 
-<figure><img src="../.gitbook/assets/image (8).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (8) (1).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -148,7 +148,7 @@ sudo systemctl enable --now mariadb apache2 zabbix-server zabbix-agent
 sudo systemctl status zabbix-server --no-pager
 ```
 
-<figure><img src="../.gitbook/assets/image (9).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (9) (1).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -164,7 +164,7 @@ sudo sed -i \
 sudo systemctl restart zabbix-agent
 ```
 
-<figure><img src="../.gitbook/assets/image (10).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (10) (1).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -180,7 +180,7 @@ sudo ufw --force enable
 sudo ufw status
 ```
 
-<figure><img src="../.gitbook/assets/image (11).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (11) (1).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -237,7 +237,7 @@ echo "ServerName ${ZBX_IP}" | sudo tee /etc/apache2/conf-available/servername.co
 sudo a2enconf servername
 ```
 
-<figure><img src="../.gitbook/assets/image (12).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (12) (1).png" alt=""><figcaption></figcaption></figure>
 
 Buat vhost HTTP (redirect ke HTTPS):
 
@@ -251,7 +251,7 @@ sudo tee /etc/apache2/sites-available/zabbix-http.conf > /dev/null <<EOF
 EOF
 ```
 
-<figure><img src="../.gitbook/assets/image (13).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (13) (1).png" alt=""><figcaption></figcaption></figure>
 
 Buat vhost HTTPS:
 
@@ -274,7 +274,7 @@ sudo tee /etc/apache2/sites-available/zabbix-ssl.conf > /dev/null <<EOF
 EOF
 ```
 
-<figure><img src="../.gitbook/assets/image (14).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (14) (1).png" alt=""><figcaption></figcaption></figure>
 
 Aktifkan site baru, matikan default, lalu reload Apache:
 
@@ -286,7 +286,7 @@ sudo apache2ctl configtest
 sudo systemctl reload apache2
 ```
 
-<figure><img src="../.gitbook/assets/image (15).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../.gitbook/assets/image (15) (1).png" alt=""><figcaption></figcaption></figure>
 
 **generate locale `en_US.UTF-8` (dan opsional `id_ID.UTF-8`)** lalu restart Apache.
 

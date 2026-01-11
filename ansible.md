@@ -39,15 +39,21 @@ Ciri khas Ansible:
 
 ### 1) Pastikan koneksi jaringan & SSH
 
+Jalankan di VM 19
+
 ```bash
 ping -c 2 192.168.56.20
 ```
+
+<figure><img src=".gitbook/assets/image.png" alt=""><figcaption></figcaption></figure>
 
 Tes SSH (ganti `<user_vm>` sesuai user di VM .20, misal `cikal`):
 
 ```bash
 ssh cikal@192.168.56.20 "hostname && whoami"
 ```
+
+<figure><img src=".gitbook/assets/image (1).png" alt=""><figcaption></figcaption></figure>
 
 Kalau belum ada SSH server di `.20`, di VM `.20` install:
 
@@ -66,6 +72,10 @@ sudo apt install -y ansible
 ansible --version
 ```
 
+<figure><img src=".gitbook/assets/image (2).png" alt=""><figcaption></figcaption></figure>
+
+Tunggu sampai proses selesai.
+
 ***
 
 ### 3) Setup SSH key (paling enak untuk pemula)
@@ -76,6 +86,8 @@ Buat SSH key di `.19` (kalau belum ada):
 ssh-keygen -t ed25519 -C "ansible"
 ```
 
+<figure><img src=".gitbook/assets/image (3).png" alt=""><figcaption></figcaption></figure>
+
 Tekan **Enter** terus sampai selesai.
 
 Copy key ke `.20`:
@@ -84,11 +96,15 @@ Copy key ke `.20`:
 ssh-copy-id cikal@192.168.56.20
 ```
 
+<figure><img src=".gitbook/assets/image (4).png" alt=""><figcaption></figcaption></figure>
+
 Tes login tanpa password:
 
 ```bash
 ssh cikal@192.168.56.20 "echo OK"
 ```
+
+<figure><img src=".gitbook/assets/image (5).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -98,6 +114,8 @@ ssh cikal@192.168.56.20 "echo OK"
 mkdir -p ~/ansible-nginx-onevm/{inventory,playbooks}
 cd ~/ansible-nginx-onevm
 ```
+
+<figure><img src=".gitbook/assets/image (6).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -121,6 +139,8 @@ ansible_become=true
 ansible_become_method=sudo
 ```
 
+<figure><img src=".gitbook/assets/image (7).png" alt=""><figcaption></figcaption></figure>
+
 ***
 
 ### 6) Tes koneksi Ansible ke VM target
@@ -133,6 +153,30 @@ Kalau sukses, akan ada `SUCCESS` dari `192.168.56.20`.
 
 > Kalau gagal karena sudo minta password, jalankan command/playbook nanti dengan `--ask-become-pass`.
 
+<figure><img src=".gitbook/assets/image (8).png" alt=""><figcaption></figcaption></figure>
+
+Atau jadikan sudo NOPASSWD seperti dibawah ini :
+
+**Jalankan di VM 192.168.56.20:**
+
+```bash
+sudo visudo -f /etc/sudoers.d/cikal-nopasswd
+```
+
+Isi:
+
+```sudoers
+cikal ALL=(ALL) NOPASSWD: ALL
+```
+
+Simpan lalu keluar.
+
+Cek:
+
+```bash
+sudo -n true && echo "NOPASSWD OK"
+```
+
 ***
 
 ### 7) “Cek sederhana” Nginx di VM target via Ansible (command-line)
@@ -143,17 +187,23 @@ Kalau sukses, akan ada `SUCCESS` dari `192.168.56.20`.
 ansible -i inventory/hosts.ini nginx_target -b -m shell -a "systemctl is-active nginx && systemctl is-enabled nginx"
 ```
 
+<figure><img src=".gitbook/assets/image (9).png" alt=""><figcaption></figcaption></figure>
+
 #### 7.2 Cek versi nginx
 
 ```bash
 ansible -i inventory/hosts.ini nginx_target -m shell -a "nginx -v"
 ```
 
+<figure><img src=".gitbook/assets/image (10).png" alt=""><figcaption></figcaption></figure>
+
 #### 7.3 Cek port 80 listen
 
 ```bash
 ansible -i inventory/hosts.ini nginx_target -b -m shell -a "ss -lntp | grep -E ':80\s' || true"
 ```
+
+<figure><img src=".gitbook/assets/image (11).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
@@ -202,6 +252,8 @@ Isi:
         mode: "0644"
 ```
 
+<figure><img src=".gitbook/assets/image (12).png" alt=""><figcaption></figcaption></figure>
+
 Jalankan:
 
 ```bash
@@ -214,6 +266,8 @@ Kalau butuh password sudo:
 ansible-playbook -i inventory/hosts.ini playbooks/nginx.yml --ask-become-pass
 ```
 
+<figure><img src=".gitbook/assets/image (13).png" alt=""><figcaption></figcaption></figure>
+
 ***
 
 ### 9) Validasi hasil (dari VM 192.168.56.19)
@@ -223,6 +277,8 @@ curl -s http://192.168.56.20 | head -n 20
 ```
 
 Harusnya muncul HTML dengan teks “OK - Nginx managed by Ansible”.
+
+<figure><img src=".gitbook/assets/image (14).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
