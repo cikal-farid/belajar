@@ -325,7 +325,7 @@ sudo tee /etc/logstash/conf.d/beats-to-elasticsearch.conf >/dev/null <<'CONF'
 input {
   beats {
     port => 5044
-    ssl => false
+    ssl_enabled => false
   }
 }
 
