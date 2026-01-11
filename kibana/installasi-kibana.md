@@ -60,6 +60,10 @@ wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch \
 | sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
 ```
 
+<figure><img src="../.gitbook/assets/image (819).png" alt=""><figcaption></figcaption></figure>
+
+<figure><img src="../.gitbook/assets/image (818).png" alt=""><figcaption></figcaption></figure>
+
 #### 1.2 Tambah repo
 
 ```bash
@@ -67,11 +71,17 @@ echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://arti
 | sudo tee /etc/apt/sources.list.d/elastic-8.x.list
 ```
 
+<figure><img src="../.gitbook/assets/image (821).png" alt=""><figcaption></figcaption></figure>
+
+<figure><img src="../.gitbook/assets/image (820).png" alt=""><figcaption></figcaption></figure>
+
 #### 1.3 Update
 
 ```bash
 sudo apt-get update
 ```
+
+Tunggu sampai proses selesai.
 
 ***
 
@@ -87,11 +97,17 @@ sudo sysctl --system
 sysctl vm.max_map_count
 ```
 
+<figure><img src="../.gitbook/assets/image (822).png" alt=""><figcaption></figcaption></figure>
+
 #### 2.2 Install Elasticsearch
 
 ```bash
 sudo apt-get install -y elasticsearch
 ```
+
+<figure><img src="../.gitbook/assets/image (823).png" alt=""><figcaption></figcaption></figure>
+
+Tunggu sampai proses selesai.
 
 #### 2.3 Backup & full replace konfigurasi
 
@@ -100,8 +116,12 @@ sudo systemctl stop elasticsearch
 
 sudo cp -a /etc/elasticsearch/elasticsearch.yml \
   /etc/elasticsearch/elasticsearch.yml.$(date +%F_%H%M%S).bak
-ls -lh /etc/elasticsearch/elasticsearch.yml*.bak
+sudo ls -lh /etc/elasticsearch/
 ```
+
+<figure><img src="../.gitbook/assets/image (824).png" alt=""><figcaption></figcaption></figure>
+
+<figure><img src="../.gitbook/assets/image (825).png" alt=""><figcaption></figcaption></figure>
 
 **Full replace** `/etc/elasticsearch/elasticsearch.yml`:
 
@@ -126,6 +146,10 @@ xpack.security.transport.ssl.enabled: false
 EOF
 ```
 
+<figure><img src="../.gitbook/assets/image (826).png" alt=""><figcaption></figcaption></figure>
+
+<figure><img src="../.gitbook/assets/image (827).png" alt=""><figcaption></figcaption></figure>
+
 #### 2.4 (Opsional tapi aman) bersihin keystore yang nyangkut
 
 Kalau sebelumnya pernah enable security/TLS dan sempat error secure\_password:
@@ -144,6 +168,10 @@ sudo systemctl enable --now elasticsearch
 sudo systemctl is-active elasticsearch
 ```
 
+<figure><img src="../.gitbook/assets/image (828).png" alt=""><figcaption></figcaption></figure>
+
+Tunggu sampai proses selesai.
+
 #### 2.6 Verifikasi Elasticsearch (CLI + Browser)
 
 **CLI (VM1)**
@@ -153,11 +181,15 @@ curl -s http://127.0.0.1:9200 | head
 curl -s http://127.0.0.1:9200/_cluster/health?pretty
 ```
 
+<figure><img src="../.gitbook/assets/image (829).png" alt=""><figcaption></figcaption></figure>
+
 **Browser (WAJIB — yang kemarin kelewat)**
 
 * Buka di browser host/laptop kamu:
   * [**http://192.168.56.21:9200**](http://192.168.56.21:9200/)
 * Harus muncul JSON info cluster (name, version, dsb).
+
+<figure><img src="../.gitbook/assets/image (831).png" alt=""><figcaption></figcaption></figure>
 
 Kalau gagal:
 
@@ -177,6 +209,8 @@ sudo ufw --force enable
 sudo ufw status
 ```
 
+<figure><img src="../.gitbook/assets/image (830).png" alt=""><figcaption></figcaption></figure>
+
 ***
 
 ### 3) Install & konfigurasi Kibana (VM1)
@@ -187,11 +221,17 @@ sudo ufw status
 sudo apt-get install -y kibana
 ```
 
+<figure><img src="../.gitbook/assets/image (834).png" alt=""><figcaption></figcaption></figure>
+
+Tunggu sampai proses selesai.
+
 #### 3.2 Backup & full replace `kibana.yml`
 
 ```bash
 sudo cp -a /etc/kibana/kibana.yml /etc/kibana/kibana.yml.$(date +%F_%H%M%S).bak
 ```
+
+<figure><img src="../.gitbook/assets/image (835).png" alt=""><figcaption></figcaption></figure>
 
 ```bash
 sudo tee /etc/kibana/kibana.yml >/dev/null <<'EOF'
@@ -201,12 +241,16 @@ elasticsearch.hosts: ["http://192.168.56.21:9200"]
 EOF
 ```
 
+<figure><img src="../.gitbook/assets/image (836).png" alt=""><figcaption></figcaption></figure>
+
 #### 3.3 Start + enable
 
 ```bash
 sudo systemctl enable --now kibana
 sudo systemctl is-active kibana
 ```
+
+<figure><img src="../.gitbook/assets/image (837).png" alt=""><figcaption></figcaption></figure>
 
 #### 3.4 Verifikasi Kibana (CLI + Browser)
 
@@ -219,6 +263,8 @@ curl -I -s http://127.0.0.1:5601 | head -n 1
 **Browser**
 
 * [**http://192.168.56.21:5601**](http://192.168.56.21:5601/)
+
+<figure><img src="../.gitbook/assets/image (841).png" alt=""><figcaption></figcaption></figure>
 
 Kalau Kibana lambat/failed:
 
@@ -238,6 +284,10 @@ sudo journalctl -u kibana -n 120 --no-pager
 sudo apt-get install -y logstash
 ```
 
+<figure><img src="../.gitbook/assets/image (838).png" alt=""><figcaption></figcaption></figure>
+
+Tunggu sampai proses selesai.
+
 #### 4.2 Buat pipeline Logstash (Beats 5044 → Elasticsearch VM1)
 
 Backup kalau file sudah ada:
@@ -247,6 +297,8 @@ sudo mkdir -p /etc/logstash/conf.d
 sudo cp -a /etc/logstash/conf.d/beats-to-elasticsearch.conf \
   /etc/logstash/conf.d/beats-to-elasticsearch.conf.$(date +%F_%H%M%S).bak 2>/dev/null || true
 ```
+
+<figure><img src="../.gitbook/assets/image (839).png" alt=""><figcaption></figcaption></figure>
 
 Full replace config:
 
@@ -269,11 +321,15 @@ output {
 CONF
 ```
 
+<figure><img src="../.gitbook/assets/image (840).png" alt=""><figcaption></figcaption></figure>
+
 #### 4.3 Test config Logstash (biar yakin sebelum start)
 
 ```bash
 sudo /usr/share/logstash/bin/logstash --path.settings /etc/logstash -t
 ```
+
+<figure><img src="../.gitbook/assets/image (842).png" alt=""><figcaption></figcaption></figure>
 
 #### 4.4 Start + enable + cek port
 
@@ -282,6 +338,10 @@ sudo systemctl enable --now logstash
 sudo systemctl is-active logstash
 sudo ss -lntp | grep ':5044' || echo "PORT 5044 TIDAK LISTEN"
 ```
+
+<figure><img src="../.gitbook/assets/image (843).png" alt=""><figcaption></figcaption></figure>
+
+<figure><img src="../.gitbook/assets/image (845).png" alt=""><figcaption></figcaption></figure>
 
 #### 4.5 Cek koneksi VM2 → Elasticsearch VM1
 
@@ -298,6 +358,8 @@ sudo ufw --force enable
 sudo ufw status
 ```
 
+<figure><img src="../.gitbook/assets/image (844).png" alt=""><figcaption></figcaption></figure>
+
 ***
 
 ### 5) Install & konfigurasi Filebeat (VM2) — versi “SIMPLE MODE journald” (yang terbukti berhasil)
@@ -311,11 +373,17 @@ sudo ufw status
 sudo apt-get install -y filebeat
 ```
 
+<figure><img src="../.gitbook/assets/image (846).png" alt=""><figcaption></figcaption></figure>
+
+Tunggu sampai proses selesai.
+
 #### 5.2 Backup & full replace `filebeat.yml`
 
 ```bash
 sudo cp -a /etc/filebeat/filebeat.yml /etc/filebeat/filebeat.yml.$(date +%F_%H%M%S).bak
 ```
+
+<figure><img src="../.gitbook/assets/image (847).png" alt=""><figcaption></figcaption></figure>
 
 ```bash
 sudo tee /etc/filebeat/filebeat.yml >/dev/null <<'YAML'
@@ -347,6 +415,10 @@ logging.files:
 YAML
 ```
 
+<figure><img src="../.gitbook/assets/image (848).png" alt=""><figcaption></figcaption></figure>
+
+<figure><img src="../.gitbook/assets/image (849).png" alt=""><figcaption></figcaption></figure>
+
 #### 5.3 Buat input journald khusus labfinal
 
 ```bash
@@ -361,6 +433,8 @@ sudo tee /etc/filebeat/inputs.d/00-journald-labfinal.yml >/dev/null <<'YAML'
 YAML
 ```
 
+<figure><img src="../.gitbook/assets/image (850).png" alt=""><figcaption></figcaption></figure>
+
 #### 5.4 Test config + restart
 
 ```bash
@@ -369,6 +443,8 @@ sudo systemctl enable --now filebeat
 sudo systemctl restart filebeat
 sudo systemctl is-active filebeat
 ```
+
+<figure><img src="../.gitbook/assets/image (851).png" alt=""><figcaption></figcaption></figure>
 
 Kalau mau cek log cepat:
 
@@ -387,6 +463,8 @@ logger -t labfinal "FINAL_TEST_$(date +%s)"
 sudo journalctl -t labfinal -n 3 --no-pager -o short-iso
 ```
 
+<figure><img src="../.gitbook/assets/image (852).png" alt=""><figcaption></figcaption></figure>
+
 ### 6.2 Pastikan Logstash masih listen (VM2)
 
 ```bash
@@ -402,6 +480,8 @@ sudo journalctl -u logstash -n 120 --no-pager | egrep -i 'error|exception|pipeli
 curl -s 'http://192.168.56.21:9200/_cat/indices?v' | grep -i filebeat || echo "belum ada index filebeat"
 ```
 
+<figure><img src="../.gitbook/assets/image (853).png" alt=""><figcaption></figcaption></figure>
+
 #### Cari event FINAL\_TEST / labfinal (query yang kamu pakai dan sudah terbukti)
 
 ```bash
@@ -414,6 +494,10 @@ curl -sG 'http://192.168.56.21:9200/filebeat-*/_search' \
 | sed 's/},{/},\n{/g'
 ```
 
+<figure><img src="../.gitbook/assets/image (854).png" alt=""><figcaption></figcaption></figure>
+
+<figure><img src="../.gitbook/assets/image (855).png" alt=""><figcaption></figcaption></figure>
+
 Kalau `hits.total.value` > 0 berarti **AMAN** (pipeline jalan).
 
 ***
@@ -424,6 +508,8 @@ Kalau `hits.total.value` > 0 berarti **AMAN** (pipeline jalan).
 
 * [**http://192.168.56.21:9200**](http://192.168.56.21:9200/)\
   Harus muncul JSON cluster.
+
+<figure><img src="../.gitbook/assets/image (856).png" alt=""><figcaption></figcaption></figure>
 
 ### 7.2 Kibana
 
@@ -440,6 +526,8 @@ Langkah di Kibana:
    * `message : FINAL_TEST_*`\
      atau
    * `log.syslog.appname : labfinal`
+
+<figure><img src="../.gitbook/assets/image (857).png" alt=""><figcaption></figcaption></figure>
 
 ***
 
