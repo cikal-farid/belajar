@@ -348,3 +348,154 @@ docker logs --tail=200 signoz-otel-collector
 ```
 
 ***
+
+#### Atau ini juga bisa
+
+Mantap, log yang kamu kirim **sudah cukup jelas** untuk nemuin akar masalahnya.
+
+### 1) Diagnosis (kenapa UI kosong & “connection refused”)
+
+#### A. `otlp-python` **bisa jalan**, tapi **gagal kirim OTLP ke collector**
+
+Buktinya dari `docker logs otlp-python`:
+
+* `Transient error StatusCode.UNAVAILABLE ... exporting logs/traces to signoz-otel-collector:4317`\
+  Ini artinya **exporter OTLP di app tidak bisa konek ke endpoint collector** (biasanya TCP connect gagal / endpoint salah).
+
+#### B. Endpoint yang dipakai demo kamu adalah **`signoz-otel-collector:4317`**
+
+Dari log jelas targetnya: `signoz-otel-collector:4317`
+
+Masalahnya: pada Docker Compose, nama service yang paling stabil untuk dipakai antar container adalah **nama service**, yaitu:
+
+✅ **`otel-collector:4317`**\
+bukan `signoz-otel-collector:4317` (itu container\_name, kadang bisa, tapi sering bikin masalah setelah restart / DNS internal)
+
+#### C. Setelah reboot, Docker restart container **tanpa urutan depends\_on**
+
+Ini menjelaskan kenapa di log collector sempat muncul:
+
+* `dial tcp ...:9000 connect: connection refused` (ClickHouse belum siap saat collector start)
+* OpAMP connect refused (tidak fatal buat OTLP, tapi tanda urutan start kacau)
+
+Jadi **setelah reboot**, stack bisa “kelihatan up”, tapi endpoint internal bisa tidak stabil sampai kamu “compose up” ulang.
+
+***
+
+### 2) FIX CEPAT (yang pasti bikin trace masuk)
+
+Kita **recreate** container demo `otlp-python` dengan endpoint yang benar.
+
+> Jalankan dari host VM kamu (Ubuntu).
+
+#### Step 1 — hapus demo lama
+
+```bash
+docker rm -f otlp-python 2>/dev/null || true
+```
+
+#### Step 2 — jalankan ulang demo dengan endpoint service name (REKOMENDASI)
+
+```bash
+docker run -d --name otlp-python --restart unless-stopped \
+  --network signoz-net \
+  -p 5002:5002 \
+  -e OTLP_ENDPOINT="otel-collector:4317" \
+  -e INSECURE="true" \
+  signoz/otlp-python:latest
+```
+
+#### Step 3 — tes koneksi TCP dari dalam container (harus OK)
+
+```bash
+docker exec otlp-python python3 - <<'PY'
+import socket
+for host in ("otel-collector","signoz-otel-collector"):
+  for port in (4317,4318):
+    try:
+      s=socket.create_connection((host,port),timeout=3); s.close()
+      print("OK ",host,port)
+    except Exception as e:
+      print("FAIL",host,port,repr(e))
+PY
+```
+
+**Target minimal yang wajib OK:** `otel-collector 4317`
+
+#### Step 4 — generate traffic
+
+```bash
+curl "http://127.0.0.1:5002/?user=alice"
+curl "http://127.0.0.1:5002/?user=bob"
+```
+
+#### Step 5 — cek log demo (warning harus hilang)
+
+```bash
+docker logs --tail=80 otlp-python
+```
+
+Kalau masih muncul `Transient error ... signoz-otel-collector:4317`, berarti container kamu belum terganti (biasanya karena command lama masih jalan). Pastikan `docker rm -f otlp-python` sukses dulu.
+
+***
+
+### 3) Cara pastiin muncul di UI (biar nggak “no results”)
+
+1. Buka: `http://192.168.56.23:8080`
+2. Ubah time range jadi **Last 15 minutes**
+3. Masuk menu **Services**
+4. Cari service name yang benar:
+
+**Demo ini biasanya muncul sebagai `demo-service`** (di log kamu juga ada `"name": "demo-service"`).\
+Jadi kalau kamu sebelumnya nge-filter **`demo-app`**, ya bakal “no results”.
+
+✅ Solusi: **Clear filter** → cari `demo-service`.
+
+***
+
+### 4) Fix permanen setelah reboot (biar tidak kejadian lagi)
+
+Karena Docker restart container **tanpa urutan**, setelah reboot lakukan salah satu:
+
+#### Opsi A (paling simpel): setelah reboot jalankan ulang compose
+
+```bash
+cd ~/signoz/deploy/docker
+docker compose up -d
+```
+
+#### Opsi B (lebih rapih): restart stack sekali saja setelah boot
+
+Kalau setelah reboot kamu lihat trace “mati”, jalankan:
+
+```bash
+cd ~/signoz/deploy/docker
+docker compose restart clickhouse
+docker compose restart otel-collector
+```
+
+> Ini memastikan ClickHouse siap dulu, lalu collector.
+
+***
+
+### 5) Kalau masih gagal (plan B yang “anti DNS internal”)
+
+Kalau (jarang) DNS docker internal bermasalah, pakai metode host-gateway (paling kebal):
+
+```bash
+docker rm -f otlp-python 2>/dev/null || true
+
+docker run -d --name otlp-python --restart unless-stopped \
+  -p 5002:5002 \
+  --add-host signoz:host-gateway \
+  -e OTLP_ENDPOINT="signoz:4317" \
+  -e INSECURE="true" \
+  signoz/otlp-python:latest
+```
+
+***
+
+Kalau kamu jalankan ulang demo pakai `otel-collector:4317`, lalu kirim output dari:
+
+* `docker exec otlp-python python3 ...` (tes socket)
+* `docker logs --tail=50 otlp-python`
