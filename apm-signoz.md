@@ -1,28 +1,27 @@
 # APM Signoz
 
-Berikut **runbook final (lengkap & “langsung jalan”)** untuk install **SigNoz self-hosted (Docker Compose) di Ubuntu 22.04** pada VM kamu (**IP 192.168.56.23, RAM 6GB, 2 core**).
+#### Apa itu “APM SigNoz”?
+
+**SigNoz** adalah **platform observability open‑source** (sering dipakai sebagai **APM**) yang “OpenTelemetry‑native”. Artinya, SigNoz mengumpulkan **traces (distributed tracing/APM)**, **metrics**, dan **logs** (plus alerting) dalam satu UI, dengan data masuk lewat **OpenTelemetry Collector** dan disimpan terutama di **ClickHouse** untuk query yang cepat.
+
+Kalau kamu fokus APM: SigNoz APM biasanya dipakai untuk:
+
+* melihat **service map**, **latency p99**, **error rate**, dan analisis trace end‑to‑end (request mengalir ke service mana saja, bottleneck di mana).
+
+Gambaran arsitektur sederhananya:
+
+1. Aplikasi di‑instrument dengan **OpenTelemetry SDK/agent**
+2. Kirim telemetry ke **SigNoz OTel Collector**
+3. Collector menulis data ke **ClickHouse**
+4. **SigNoz (backend+frontend)** men-query & menampilkan di UI + alerting
 
 ***
 
-### 0) Asumsi & checklist sebelum mulai
+## RUNBOOK FINAL — SigNoz (Docker Compose) Ubuntu 22.04 (VM 192.168.56.23)
 
-#### 0.1 Resource & catatan penting
+### A. Install & Deploy (sekali saja)
 
-* SigNoz (single VM) **bisa jalan untuk POC/lab/dev**; minimum RAM yang disebut adalah **4GB** dan port **8080/4317/4318** harus terbuka.
-* Di runbook PDF, rekomendasi “nyaman” untuk 1 VM itu lebih besar (RAM 8–16GB, vCPU 4). Kamu RAM 6GB & 2 core, jadi **bisa jalan**, tapi supaya minim risiko **OOM**, aku tambahkan langkah **SWAP** (aman, standar).
-
-#### 0.2 Port yang dipakai
-
-Buka inbound:
-
-* **8080/tcp** → UI SigNoz
-* **4317/tcp** → OTLP gRPC
-* **4318/tcp** → OTLP HTTP\
-  Catatan security: **jangan buka 4317/4318 ke internet publik**; batasi ke private network/VPN.
-
-***
-
-### 1) Update OS & install tools dasar (sebagai user `cikal`)
+#### 1) Update OS + tools
 
 ```bash
 sudo apt update
@@ -30,7 +29,7 @@ sudo apt -y upgrade
 sudo apt -y install git curl ca-certificates gnupg
 ```
 
-#### (Sangat disarankan) Tambah SWAP 4GB biar nggak gampang OOM (RAM 6GB)
+#### 2) (Recommended) Tambah swap 4GB (VM RAM 6GB)
 
 ```bash
 sudo fallocate -l 4G /swapfile
@@ -41,29 +40,13 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 free -h
 ```
 
-(Optional) reboot kalau kernel/upgrade besar:
-
-```bash
-sudo reboot
-```
-
-***
-
-### 2) Install Docker Engine + Docker Compose plugin (cara repo resmi)
-
-Langkah di bawah ini mengikuti pola yang ada di PDF: remove paket konflik, tambah repo Docker, install `docker-ce` + `docker-compose-plugin`.
-
-#### 2.1 Bersihkan paket Docker versi distro (kalau ada)
+#### 3) Install Docker Engine + Compose plugin
 
 ```bash
 for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
   sudo apt-get remove -y $pkg
 done
-```
 
-#### 2.2 Add repository Docker resmi
-
-```bash
 sudo install -m 0755 -d /etc/apt/keyrings
 
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
@@ -75,261 +58,94 @@ echo \
 "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
 $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
 sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-```
 
-#### 2.3 Install Docker + Compose plugin, lalu tes
-
-```bash
 sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
+sudo systemctl enable --now docker
 sudo docker run --rm hello-world
-docker version
 docker compose version
 ```
 
-#### 2.4 Supaya `cikal` bisa jalanin docker tanpa sudo (opsional tapi enak)
+#### 4) (Optional, recommended) Docker tanpa sudo untuk user `cikal`
 
 ```bash
 sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-> Kalau `newgrp docker` bikin session “aneh”, cukup logout/login SSH sekali.
-
-***
-
-### 3) (Opsional) Firewall UFW — versi aman (private network)
-
-Di PDF, contoh UFW: allow 22, 8080, 4317, 4318 lalu enable.\
-Karena kamu pakai network 192.168.56.x, ini versi yang lebih aman: **4317/4318 hanya dari subnet lokal**.
-
-```bash
-sudo ufw allow 22/tcp
-sudo ufw allow 8080/tcp
-
-# Batasi OTLP hanya dari jaringan host-only / private (sesuaikan kalau beda subnet)
-sudo ufw allow from 192.168.56.0/24 to any port 4317 proto tcp
-sudo ufw allow from 192.168.56.0/24 to any port 4318 proto tcp
-
-sudo ufw enable
-sudo ufw status
-```
-
-(Pastikan port 22 sudah di-allow sebelum enable supaya tidak ke-lockout.)
-
-***
-
-### 4) Deploy SigNoz (Docker Compose) — pakai user `cikal` (tanpa user baru)
-
-Di PDF, langkahnya: clone repo SigNoz, masuk `signoz/deploy/docker`, lalu `docker compose up -d --remove-orphans`.
+#### 5) Clone SigNoz + start stack
 
 ```bash
 cd ~
 git clone -b main https://github.com/SigNoz/signoz.git
-cd signoz/deploy/docker
+cd ~/signoz/deploy/docker
 docker compose up -d --remove-orphans
 ```
 
-***
-
-### 5) Verifikasi instalasi
-
-#### 5.1 Pastikan container up
+#### 6) Cek status container
 
 ```bash
 cd ~/signoz/deploy/docker
 docker compose ps
 ```
 
-Kalau ada yang restart-loop:
+#### 7) Akses UI
 
-```bash
-docker compose logs -f --tail=200
-```
+Buka di browser:
 
-#### 5.2 Akses UI
-
-Dari laptop/browser:
-
-* `http://192.168.56.23:8080/`
+* `http://192.168.56.23:8080`
 
 ***
 
-### 6) Endpoint OTLP untuk aplikasi
+### B. Deploy “Generator Test” (otlp-python) (buat test trace kapan pun)
 
-Arahkan exporter OpenTelemetry ke:
+> Ini bukan wajib, tapi sangat berguna untuk test cepat.
 
-* OTLP gRPC: `192.168.56.23:4317`
-* OTLP HTTP: `http://192.168.56.23:4318`
-
-Contoh env var (gRPC) yang dicontohkan di PDF:
+#### 1) Jalankan otlp-python di network SigNoz + auto-start
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT="http://192.168.56.23:4317"
-export OTEL_EXPORTER_OTLP_PROTOCOL="grpc"
-```
+docker rm -f otlp-python 2>/dev/null || true
 
-***
-
-### 7) Tes end-to-end (tanpa instrument aplikasi dulu)
-
-PDF punya cara “paling enak”: jalankan sample generator `signoz/otlp-python`, lalu hit endpoint untuk generate traces/logs.
-
-#### 7.1 Jalankan generator
-
-```bash
-sudo docker rm -f otlp-python 2>/dev/null || true
-
-sudo docker run -d --name otlp-python \
+docker run -d --name otlp-python --restart unless-stopped \
+  --network signoz-net \
   -p 5002:5002 \
-  --add-host signoz:host-gateway \
-  -e OTLP_ENDPOINT="signoz:4317" \
+  -e OTLP_ENDPOINT="signoz-otel-collector:4317" \
   -e INSECURE="true" \
   signoz/otlp-python
 ```
 
-#### 7.2 Generate traffic (buat muncul data)
+#### 2) Tes generate trace
 
 ```bash
 curl "http://127.0.0.1:5002/?user=alice"
 curl "http://127.0.0.1:5002/?user=bob"
 ```
 
-#### 7.3 Validasi di UI
+#### 3) Validasi di UI
 
-* **Traces Explorer** → time range **Last 15 mins** → harus muncul trace dari service sample
-* **Logs Explorer** → time range **Last 15 mins** → harus muncul log
+UI → Explorer → Traces:
 
-***
-
-### 8) Operasional dasar
-
-#### 8.1 Stop / Start stack
-
-```bash
-cd ~/signoz/deploy/docker
-docker compose down
-docker compose up -d
-```
-
-#### 8.2 Uninstall
-
-Hapus container + network (data tetap ada di volume):
-
-```bash
-cd ~/signoz/deploy/docker
-docker compose down --remove-orphans
-```
-
-⚠️ Hapus juga volume (ClickHouse/Postgres ikut hilang):
-
-```bash
-cd ~/signoz/deploy/docker
-docker compose down -v --remove-orphans
-```
+* time range **Last 15 minutes**
+* filter `service.name="demo-app"` (atau pilih service `demo-app`)
+* Run Query → harus muncul trace baru.
 
 ***
 
-### 9) Troubleshooting cepat (yang paling sering)
+## C. SOP Setelah VM Restart (INI YANG KAMU BUTUH)
 
-#### 9.1 UI tidak bisa dibuka di `http://192.168.56.23:8080`
-
-* Pastikan port 8080 kebuka (UFW/SG)
-* Cek container & log:
+### 1) Pastikan Docker hidup + SigNoz container up
 
 ```bash
+sudo systemctl status docker --no-pager
 cd ~/signoz/deploy/docker
 docker compose ps
-docker compose logs -f --tail=200
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 ```
 
-#### 9.2 `docker compose` tidak ada
+### 2) Smoke test: pastikan OTLP receiver benar-benar listen
 
-Pastikan package `docker-compose-plugin` terpasang dan cek:
-
-```bash
-docker compose version
-```
-
-#### 9.3 Lupa lokasi `docker-compose.yaml` SigNoz (tanpa tebak-tebakan)
-
-Dari user `cikal`, jalankan:
-
-```bash
-sudo docker compose ls
-```
-
-Lihat kolom **CONFIG FILES**; lalu jalankan:
-
-```bash
-sudo docker compose -f /PATH_YANG_MUNCUL ps
-```
-
-Kalau `compose ls` kosong, cari file compose:
-
-```bash
-sudo find /home -maxdepth 5 -type f \( -name "docker-compose.yml" -o -name "docker-compose.yaml" \) | grep -i signoz
-```
-
-#### 9.4 VM sering OOM / lambat
-
-Untuk 1 VM, kombinasi ClickHouse + collector memang bisa berat; PDF menyarankan naikkan RAM (8–16GB) dan pastikan SSD + cek disk free.\
-Dengan VM kamu (6GB), **SWAP** di langkah 1 biasanya cukup membantu menghindari crash, walau performa bisa turun saat swap aktif.
-
-***
-
-Kalau kamu mau, kirim output 2 perintah ini dari VM (biar aku bisa pastikan semuanya “sehat” di kondisi 6GB RAM):
-
-```bash
-docker compose -f ~/signoz/deploy/docker/docker-compose.yaml ps
-sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | head -n 30
-```
-
-#### Tambahan
-
-Mantap—kalau sudah muncul lagi `demo-app`, berarti stack SigNoz kamu **sehat** sekarang ✅
-
-Soal pertanyaan kamu: **runbook kamu tidak “salah” secara instalasi**, tapi ada **1 bagian yang belum “robust” untuk kondisi setelah reboot**.
-
-#### Kenapa habis reboot kamu `curl` tapi UI kosong?
-
-Karena waktu itu **OTLP receiver di `signoz-otel-collector` tidak listen di 4317/4318**, sehingga:
-
-* `curl` → **hanya sampai ke `otlp-python`** (makanya “Hello bob” tetap muncul)
-* tapi `otlp-python` **gagal export traces/logs** (muncul `StatusCode.UNAVAILABLE`)
-* akibatnya **tidak ada data baru masuk ke SigNoz**, UI jadi kosong untuk time range “Last 5 minutes”.
-
-Kamu membuktikan sendiri:
-
-* dari `otlp-python` → `Connection refused` ke `signoz-otel-collector:4317/4318`
-* di collector `/proc/net/tcp` → `NOT LISTENING`
-* setelah kamu **restore `otel-collector-config.yaml`** dan recreate collector → log menunjukkan:
-  * `Starting GRPC server ... 0.0.0.0:4317`
-  * `Starting HTTP server ... 0.0.0.0:4318`\
-    dan test socket jadi `OK 4317` & `OK 4318`.
-
-Jadi akar masalahnya: **file bind-mount** `~/signoz/deploy/docker/otel-collector-config.yaml` yang dipakai collector itu sebelumnya **tidak sesuai / berubah / ter-truncate**, sehingga OTLP receiver tidak aktif saat container start setelah reboot.
-
-***
-
-### Supaya runbook kamu “anti-kendala” setelah reboot (yang perlu kamu tambahkan)
-
-#### A) Jadikan `otlp-python` auto-start
-
-Karena sebelumnya restart policy `no`, setelah reboot dia tidak otomatis hidup.
-
-Kalau kamu masih pakai `otlp-python` buat tes:
-
-```bash
-docker update --restart unless-stopped otlp-python
-```
-
-#### B) Tambahkan “smoke test setelah reboot” (wajib)
-
-Ini yang bikin kamu nggak ketipu “Hello bob” tapi sebenarnya trace tidak masuk.
-
-1. Pastikan collector listen:
+> Ini penting, karena “Hello bob” tidak menjamin trace masuk.
 
 ```bash
 python3 - <<'PY'
@@ -344,46 +160,94 @@ for port in (4317,4318):
 PY
 ```
 
-2. Kalau sudah `OTLP OK`, baru generate trace:
+**Kalau hasilnya `OTLP OK 4317` dan/atau `OTLP OK 4318` → lanjut langkah 3.**\
+**Kalau `OTLP FAIL` → lompat ke bagian D (Recovery).**
+
+### 3) Test trace (cukup curl)
 
 ```bash
 curl "http://127.0.0.1:5002/?user=alice"
 curl "http://127.0.0.1:5002/?user=bob"
 ```
 
-3. UI → Explorer Traces → **Last 15 minutes** → filter `service.name="demo-app"` → Run Query.
-
-#### C) Tambahkan “recovery one-liner” kalau OTLP FAIL (ini yang menyelamatkan kamu tadi)
-
-Kalau post-reboot test bilang `OTLP FAIL`, jalankan:
+### 4) Cek cepat error exporter (harusnya tidak ada “UNAVAILABLE”)
 
 ```bash
-cd ~/signoz
-git checkout -- deploy/docker/otel-collector-config.yaml
-cd ~/signoz/deploy/docker
-docker compose up -d --force-recreate --no-deps otel-collector
+docker logs --tail=50 otlp-python
 ```
 
 ***
 
-### Kenapa bisa berubah? (biar tidak kejadian lagi)
+## D. Recovery (kalau setelah reboot “curl hello” tapi tidak ada trace baru)
 
-Karena `otel-collector-config.yaml` itu **bind-mount dari host**, jadi kalau file itu:
+Gejala:
 
-* pernah ke-edit (walau tidak sengaja),
-* pernah di-overwrite,
-* atau pernah jadi kosong/korup,
+* UI kosong untuk `demo-app`
+* log `otlp-python` ada `StatusCode.UNAVAILABLE`
+* atau smoke test `OTLP FAIL`
 
-maka setelah reboot collector start dengan config itu dan **OTLP receiver bisa hilang**.
+### 1) Restore config collector ke default repo + recreate collector
 
-Kalau kamu mau ekstra aman: simpan backup “golden config” seperti yang sudah kamu buat, dan kalau perlu bikin file itu read-only (opsional).
+```bash
+cd ~/signoz
+
+# backup config yang sedang ada (biar aman)
+cp deploy/docker/otel-collector-config.yaml ~/otel-collector-config.yaml.bak.$(date +%F-%H%M%S)
+
+# balikin ke config default repo
+git checkout -- deploy/docker/otel-collector-config.yaml
+
+# recreate collector
+cd ~/signoz/deploy/docker
+docker compose up -d --force-recreate --no-deps otel-collector
+```
+
+### 2) Verify port 4317/4318 dari dalam otlp-python
+
+```bash
+docker exec otlp-python sh -lc 'python3 - <<PY
+import socket
+host="signoz-otel-collector"
+for port in (4317,4318):
+    try:
+        s=socket.create_connection((host,port),timeout=3)
+        print("OK",port)
+        s.close()
+    except Exception as e:
+        print("FAIL",port,e)
+PY'
+```
+
+### 3) Generate trace lagi
+
+```bash
+curl "http://127.0.0.1:5002/?user=alice"
+curl "http://127.0.0.1:5002/?user=bob"
+```
 
 ***
 
-Kalau kamu mau, aku bisa bantu “finalisasi runbook kamu” dengan 1 section tambahan:
+## E. Operasional (Start/Stop)
 
-* **Post-reboot smoke test**
-* **Recovery**
-* dan **cara jaga `otel-collector-config.yaml` tetap golden**
+### Stop semua
 
-Cukup bilang kamu mau format runbook-nya seperti apa (markdown / step-by-step copy paste).
+```bash
+cd ~/signoz/deploy/docker
+docker compose down
+```
+
+### Start lagi
+
+```bash
+cd ~/signoz/deploy/docker
+docker compose up -d --remove-orphans
+```
+
+***
+
+## F. Catatan kecil
+
+* Warning `version is obsolete` di compose **aman diabaikan**.
+* Kalau VM kamu berat/sering OOM, swap 4GB sangat membantu.
+
+***
