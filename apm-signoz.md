@@ -251,3 +251,100 @@ docker compose up -d --remove-orphans
 * Kalau VM kamu berat/sering OOM, swap 4GB sangat membantu.
 
 ***
+
+#### Tambahan jika restart vm dan tidak ada log nya (connection refused)
+
+Mantap, hasil debug kamu sudah **sangat jelas**:
+
+* `otlp-python` dan `signoz-otel-collector` **sudah satu network (`signoz-net`)** ✅
+* DNS resolve **beres** (ke `172.18.0.4`) ✅
+* Tapi koneksi ke `4317/4318` dari `otlp-python` = **Connection refused** ❌
+* Dan di collector `/proc/net/tcp*` **tidak ada LISTEN di 4317/4318** ❌ (`NOT LISTENING`)
+
+Jadi root cause-nya: **proses di dalam container `signoz-otel-collector` tidak membuka OTLP receiver** (port 4317/4318). Port “published” di compose itu hanya mapping, tapi kalau di dalam container tidak listen, tetap akan “refused”.
+
+Di bawah ini fix yang paling cepat dan “bersih”.
+
+***
+
+### 1) Restore config collector ke default dari repo (paling sering ini penyebabnya)
+
+Kadang file `otel-collector-config.yaml` berubah/korup sehingga receiver OTLP hilang.
+
+Jalankan:
+
+```bash
+cd ~/signoz
+
+# backup dulu biar aman
+cp deploy/docker/otel-collector-config.yaml ~/otel-collector-config.yaml.bak.$(date +%F-%H%M%S)
+
+# balikin ke versi default repo
+git checkout -- deploy/docker/otel-collector-config.yaml
+```
+
+***
+
+### 2) Recreate container collector (biar config baru kebaca)
+
+```bash
+cd ~/signoz/deploy/docker
+docker compose up -d --force-recreate --no-deps otel-collector
+```
+
+***
+
+### 3) Tes lagi dari dalam `otlp-python` (harusnya sekarang OK)
+
+```bash
+docker exec otlp-python sh -lc 'python3 - <<PY
+import socket
+host="signoz-otel-collector"
+for port in (4317,4318):
+    try:
+        s=socket.create_connection((host,port),timeout=3)
+        print("OK",port)
+        s.close()
+    except Exception as e:
+        print("FAIL",port,e)
+PY'
+```
+
+Target: minimal `OK 4317` dan idealnya `OK 4318` juga.
+
+***
+
+### 4) Kalau sudah OK, baru test generate trace
+
+```bash
+curl "http://127.0.0.1:5002/?user=alice"
+curl "http://127.0.0.1:5002/?user=bob"
+```
+
+Di UI:
+
+* time range **Last 15 minutes**
+* **Clear** query/filter yang aneh dulu (hapus `service.name not in ['compose']` sementara)
+* Run Query → nanti akan muncul service demo lagi
+
+***
+
+### Kalau setelah recreate masih `NOT LISTENING`
+
+Berarti collector sebenarnya jalan, tapi config yang dia pakai tetap tidak mengaktifkan OTLP. Kita cek isi config yang sedang dipakai **di dalam container**:
+
+```bash
+docker exec signoz-otel-collector sh -lc '
+echo "=== otel config (search otlp receiver) ==="
+grep -n "receivers:" -n /etc/otel-collector-config.yaml || true
+grep -n "otlp" /etc/otel-collector-config.yaml | head -n 80 || true
+'
+```
+
+Dan cek log collector (pakai `docker logs` langsung):
+
+```bash
+docker logs --tail=200 signoz-otel-collector
+```
+
+***
