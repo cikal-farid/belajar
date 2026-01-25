@@ -1,84 +1,28 @@
 # APM Signoz
 
-#### Apa itu “APM SigNoz”?
-
-**SigNoz** adalah **platform observability open‑source** (sering dipakai sebagai **APM**) yang “OpenTelemetry‑native”. Artinya, SigNoz mengumpulkan **traces (distributed tracing/APM)**, **metrics**, dan **logs** (plus alerting) dalam satu UI, dengan data masuk lewat **OpenTelemetry Collector** dan disimpan terutama di **ClickHouse** untuk query yang cepat. ([SigNoz](https://signoz.io/?utm_source=chatgpt.com))
-
-Kalau kamu fokus APM: SigNoz APM biasanya dipakai untuk:
-
-* melihat **service map**, **latency p99**, **error rate**, dan analisis trace end‑to‑end (request mengalir ke service mana saja, bottleneck di mana). ([SigNoz](https://signoz.io/docs/instrumentation/overview/?utm_source=chatgpt.com))
-
-Gambaran arsitektur sederhananya:
-
-1. Aplikasi di‑instrument dengan **OpenTelemetry SDK/agent**
-2. Kirim telemetry ke **SigNoz OTel Collector**
-3. Collector menulis data ke **ClickHouse**
-4. **SigNoz (backend+frontend)** men-query & menampilkan di UI + alerting ([SigNoz](https://signoz.io/docs/architecture/))
+Berikut **runbook final (lengkap & “langsung jalan”)** untuk install **SigNoz self-hosted (Docker Compose) di Ubuntu 22.04** pada VM kamu (**IP 192.168.56.23, RAM 6GB, 2 core**).
 
 ***
 
-### Rekomendasi butuh berapa VM? Apakah 1 cukup?
+### 0) Asumsi & checklist sebelum mulai
 
-**Jawaban praktisnya:**
+#### 0.1 Resource & catatan penting
 
-* **1 VM cukup** untuk **POC/lab/dev** dan **workload kecil** (single-node, tanpa HA).
-* Untuk **production**, “cukup” tergantung target: volume telemetry, retensi data, dan kebutuhan HA. Minimal production yang lebih nyaman biasanya **2 VM** (pisah storage ClickHouse vs komponen lain).
-* Untuk **HA & scale**, bisa butuh beberapa node (ClickHouse shard/replica + ZooKeeper + beberapa collector). Di panduan capacity planning SigNoz (community), contoh deployment yang scalable memakai beberapa komponen dengan beberapa replika/node (misalnya collector 3 replika, ZooKeeper 3 node, ClickHouse multi-shard, dst). ([SigNoz](https://signoz.io/docs/setup/capacity-planning/community/resources-planning/))
+* SigNoz (single VM) **bisa jalan untuk POC/lab/dev**; minimum RAM yang disebut adalah **4GB** dan port **8080/4317/4318** harus terbuka.
+* Di runbook PDF, rekomendasi “nyaman” untuk 1 VM itu lebih besar (RAM 8–16GB, vCPU 4). Kamu RAM 6GB & 2 core, jadi **bisa jalan**, tapi supaya minim risiko **OOM**, aku tambahkan langkah **SWAP** (aman, standar).
 
-#### Rekomendasi “tier” yang masuk akal
+#### 0.2 Port yang dipakai
 
-**Tier A — 1 VM (cukup untuk mulai)**
-
-* Cocok: trial 1–2 minggu, internal kecil, atau monitoring beberapa service.
-* Kelemahan: **tidak HA**; kalau VM mati, observability ikut mati.
-* Minimal: SigNoz menyebut **minimal 4GB memory** untuk Docker dan pastikan port **8080/4317/4318** terbuka. ([SigNoz](https://signoz.io/docs/install/docker/))
-* Saran realistis agar tidak “ngos-ngosan”:
-  * **vCPU:** 4
-  * **RAM:** 8–16 GB
-  * **Disk:** 80–200 GB SSD (ClickHouse cepat “makan” disk kalau traces/logs banyak)
-
-**Tier B — 2 VM (rekomendasi untuk production kecil-menengah)**
-
-* VM#1: **ClickHouse** (disk & IOPS paling penting)
-* VM#2: **SigNoz core + OTel Collector + PostgreSQL**
-* Benefit: lebih mudah scaling (khususnya storage) dan performa lebih stabil.
-
-**Tier C — HA / Growth**
-
-* Mengarah ke multi-node: beberapa collector, ClickHouse shard/replica, ZooKeeper (atau keeper) terpisah, dsb. (lihat contoh kebutuhan resource per komponen di capacity planning). ([SigNoz](https://signoz.io/docs/setup/capacity-planning/community/resources-planning/))
-
-> Catatan: SigNoz juga menyarankan memasang SigNoz di VM/cluster terpisah dari VM tempat aplikasi berjalan (bukan wajib, tapi direkomendasikan). ([SigNoz](https://signoz.io/docs/faqs/installation/))
-
-***
-
-## Runbook: Install SigNoz Self‑Hosted di VM Ubuntu 22.04 (Docker Compose)
-
-Ini runbook paling “aman dan cepat” untuk VM tunggal. SigNoz menyediakan 2 cara: pakai **install script** atau jalankan **docker compose up** sendiri. ([SigNoz](https://signoz.io/docs/install/docker/))\
-Aku tulis detail untuk opsi “manual” dulu (lebih terkontrol), lalu ada opsi “install script” sebagai alternatif.
-
-***
-
-### 0) Checklist sebelum mulai
-
-#### 0.1. Kebutuhan VM & akses
-
-* Ubuntu **22.04 LTS (Jammy)** (Docker resmi support Jammy 22.04). ([Docker Documentation](https://docs.docker.com/engine/install/ubuntu/?utm_source=chatgpt.com))
-* Punya user dengan sudo.
-* Disk SSD direkomendasikan (ClickHouse).
-
-#### 0.2. Port yang perlu dibuka
-
-Di VM tempat SigNoz berjalan, pastikan inbound:
+Buka inbound:
 
 * **8080/tcp** → UI SigNoz
-* **4317/tcp** → OTLP gRPC (traces/metrics/logs dari app/collector)
-* **4318/tcp** → OTLP HTTP ([SigNoz](https://signoz.io/docs/install/docker/))
-
-> Security tip: jangan buka 4317/4318 ke internet publik. Batasi ke private network / VPN / security group internal.
+* **4317/tcp** → OTLP gRPC
+* **4318/tcp** → OTLP HTTP\
+  Catatan security: **jangan buka 4317/4318 ke internet publik**; batasi ke private network/VPN.
 
 ***
 
-### 1) Update OS & install tool dasar
+### 1) Update OS & install tools dasar (sebagai user `cikal`)
 
 ```bash
 sudo apt update
@@ -86,7 +30,18 @@ sudo apt -y upgrade
 sudo apt -y install git curl ca-certificates gnupg
 ```
 
-(Opsional tapi bagus) reboot:
+#### (Sangat disarankan) Tambah SWAP 4GB biar nggak gampang OOM (RAM 6GB)
+
+```bash
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+free -h
+```
+
+(Optional) reboot kalau kernel/upgrade besar:
 
 ```bash
 sudo reboot
@@ -94,25 +49,11 @@ sudo reboot
 
 ***
 
-### 2) (Opsional tapi direkomendasikan) Buat user khusus “signoz”
+### 2) Install Docker Engine + Docker Compose plugin (cara repo resmi)
 
-Kalau VM masih fresh dan kamu ingin rapih:
+Langkah di bawah ini mengikuti pola yang ada di PDF: remove paket konflik, tambah repo Docker, install `docker-ce` + `docker-compose-plugin`.
 
-```bash
-sudo adduser signoz
-sudo usermod -aG sudo signoz
-sudo -iu signoz
-```
-
-SigNoz juga mengingatkan untuk **pakai non-root user** saat clone repo agar tidak kena problem permission. ([SigNoz](https://signoz.io/docs/install/docker/))
-
-***
-
-### 3) Install Docker Engine + Docker Compose plugin (cara resmi)
-
-Ikuti langkah repo resmi Docker (ringkas tapi sesuai doc):
-
-#### 3.1. Bersihkan paket Docker versi distro (kalau ada)
+#### 2.1 Bersihkan paket Docker versi distro (kalau ada)
 
 ```bash
 for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
@@ -120,7 +61,7 @@ for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker c
 done
 ```
 
-#### 3.2. Add repository Docker resmi
+#### 2.2 Add repository Docker resmi
 
 ```bash
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -131,212 +72,216 @@ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
 sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
 echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+```
 
+#### 2.3 Install Docker + Compose plugin, lalu tes
+
+```bash
 sudo apt-get update
-```
-
-Sumber rujukan langkah install Docker Engine di Ubuntu ada di dokumentasi resmi Docker. ([Docker Documentation](https://docs.docker.com/engine/install/ubuntu/?utm_source=chatgpt.com))
-
-#### 3.3. Install Docker + Compose plugin
-
-```bash
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-```
 
-Dokumentasi Compose plugin di Linux: ([Docker Documentation](https://docs.docker.com/compose/install/linux/?utm_source=chatgpt.com))
-
-#### 3.4. Tes Docker jalan
-
-```bash
 sudo docker run --rm hello-world
-```
-
-#### 3.5. Supaya bisa jalanin docker tanpa sudo (opsional)
-
-```bash
-sudo usermod -aG docker $USER
-newgrp docker
 docker version
 docker compose version
 ```
 
+#### 2.4 Supaya `cikal` bisa jalanin docker tanpa sudo (opsional tapi enak)
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+> Kalau `newgrp docker` bikin session “aneh”, cukup logout/login SSH sekali.
+
 ***
 
-### 4) (Opsional) Set firewall UFW
+### 3) (Opsional) Firewall UFW — versi aman (private network)
 
-Kalau kamu pakai UFW:
+Di PDF, contoh UFW: allow 22, 8080, 4317, 4318 lalu enable.\
+Karena kamu pakai network 192.168.56.x, ini versi yang lebih aman: **4317/4318 hanya dari subnet lokal**.
 
 ```bash
 sudo ufw allow 22/tcp
 sudo ufw allow 8080/tcp
-sudo ufw allow 4317/tcp
-sudo ufw allow 4318/tcp
+
+# Batasi OTLP hanya dari jaringan host-only / private (sesuaikan kalau beda subnet)
+sudo ufw allow from 192.168.56.0/24 to any port 4317 proto tcp
+sudo ufw allow from 192.168.56.0/24 to any port 4318 proto tcp
+
 sudo ufw enable
 sudo ufw status
 ```
 
-> Pastikan port SSH (22) sudah di-allow sebelum `ufw enable`, biar tidak lockout.
+(Pastikan port 22 sudah di-allow sebelum enable supaya tidak ke-lockout.)
 
 ***
 
-### 5) Deploy SigNoz dengan Docker Compose
+### 4) Deploy SigNoz (Docker Compose) — pakai user `cikal` (tanpa user baru)
 
-#### 5.1. Clone repo SigNoz
-
-Dari doc resmi SigNoz:
+Di PDF, langkahnya: clone repo SigNoz, masuk `signoz/deploy/docker`, lalu `docker compose up -d --remove-orphans`.
 
 ```bash
+cd ~
 git clone -b main https://github.com/SigNoz/signoz.git
-cd signoz/deploy/
-```
-
-([SigNoz](https://signoz.io/docs/install/docker/))
-
-#### 5.2. Jalankan SigNoz (cara manual docker compose)
-
-```bash
-cd docker
+cd signoz/deploy/docker
 docker compose up -d --remove-orphans
 ```
 
-Ini sesuai instruksi “Install SigNoz Using Docker Compose”. ([SigNoz](https://signoz.io/docs/install/docker/))
-
-> Pertama kali pull image bisa agak lama tergantung koneksi.
-
 ***
 
-### 6) Verifikasi instalasi
+### 5) Verifikasi instalasi
 
-#### 6.1. Pastikan container up
-
-Jalankan dari folder `signoz/deploy/docker`:
+#### 5.1 Pastikan container up
 
 ```bash
+cd ~/signoz/deploy/docker
 docker compose ps
 ```
 
-Kalau ada yang restart-loop, lihat log:
+Kalau ada yang restart-loop:
 
 ```bash
 docker compose logs -f --tail=200
 ```
 
-#### 6.2. Akses UI
+#### 5.2 Akses UI
 
-Buka di browser:
+Dari laptop/browser:
 
-* `http://<IP-VM>:8080/` ([SigNoz](https://signoz.io/docs/install/docker/))
-
-Kalau kamu akses dari laptop:
-
-* pastikan security group / firewall cloud mengizinkan port 8080.
+* `http://192.168.56.23:8080/`
 
 ***
 
-### 7) Konfigurasi aplikasi agar mengirim traces/metrics/logs ke SigNoz (ringkas)
+### 6) Endpoint OTLP untuk aplikasi
 
-Dari sisi aplikasi (yang sudah instrument OpenTelemetry), endpoint umumnya:
+Arahkan exporter OpenTelemetry ke:
 
-* OTLP gRPC: `<IP-VM>:4317`
-* OTLP HTTP: `http://<IP-VM>:4318`
+* OTLP gRPC: `192.168.56.23:4317`
+* OTLP HTTP: `http://192.168.56.23:4318`
 
-Port ini memang diminta dibuka oleh SigNoz saat instal. ([SigNoz](https://signoz.io/docs/install/docker/))
-
-Contoh (umum, banyak SDK support env var):
+Contoh env var (gRPC) yang dicontohkan di PDF:
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT="http://<IP-VM>:4317"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://192.168.56.23:4317"
 export OTEL_EXPORTER_OTLP_PROTOCOL="grpc"
 ```
 
-(Detailnya beda tiap bahasa/framework, tapi konsepnya sama: arahkan exporter ke 4317/4318.)
+***
+
+### 7) Tes end-to-end (tanpa instrument aplikasi dulu)
+
+PDF punya cara “paling enak”: jalankan sample generator `signoz/otlp-python`, lalu hit endpoint untuk generate traces/logs.
+
+#### 7.1 Jalankan generator
+
+```bash
+sudo docker rm -f otlp-python 2>/dev/null || true
+
+sudo docker run -d --name otlp-python \
+  -p 5002:5002 \
+  --add-host signoz:host-gateway \
+  -e OTLP_ENDPOINT="signoz:4317" \
+  -e INSECURE="true" \
+  signoz/otlp-python
+```
+
+#### 7.2 Generate traffic (buat muncul data)
+
+```bash
+curl "http://127.0.0.1:5002/?user=alice"
+curl "http://127.0.0.1:5002/?user=bob"
+```
+
+#### 7.3 Validasi di UI
+
+* **Traces Explorer** → time range **Last 15 mins** → harus muncul trace dari service sample
+* **Logs Explorer** → time range **Last 15 mins** → harus muncul log
 
 ***
 
 ### 8) Operasional dasar
 
-#### 8.1. Stop / Start stack
-
-Stop:
+#### 8.1 Stop / Start stack
 
 ```bash
 cd ~/signoz/deploy/docker
 docker compose down
-```
-
-Start lagi:
-
-```bash
-cd ~/signoz/deploy/docker
 docker compose up -d
 ```
 
-#### 8.2. Uninstall (HATI-HATI: bisa hapus data)
+#### 8.2 Uninstall
 
-Kalau kamu mau hapus container + network:
+Hapus container + network (data tetap ada di volume):
 
 ```bash
+cd ~/signoz/deploy/docker
 docker compose down --remove-orphans
 ```
 
-Kalau mau sekalian hapus volume (data ClickHouse/Postgres ikut hilang):
+⚠️ Hapus juga volume (ClickHouse/Postgres ikut hilang):
 
 ```bash
+cd ~/signoz/deploy/docker
 docker compose down -v --remove-orphans
 ```
 
 ***
 
-## Alternatif: Install pakai `install.sh` (lebih otomatis)
+### 9) Troubleshooting cepat (yang paling sering)
 
-SigNoz juga menyediakan cara “1 command” via script yang:
+#### 9.1 UI tidak bisa dibuka di `http://192.168.56.23:8080`
 
-* cek environment,
-* install Docker Engine & Docker Compose di Linux,
-* lalu menjalankan `docker compose up`. ([SigNoz](https://signoz.io/docs/install/docker/))
-
-Langkahnya (sesuai doc):
+* Pastikan port 8080 kebuka (UFW/SG)
+* Cek container & log:
 
 ```bash
-git clone -b main https://github.com/SigNoz/signoz.git && cd signoz/deploy/
-./install.sh
+cd ~/signoz/deploy/docker
+docker compose ps
+docker compose logs -f --tail=200
 ```
 
-([SigNoz](https://signoz.io/docs/install/docker/))
+#### 9.2 `docker compose` tidak ada
 
-Kalau kamu sudah install Docker sendiri, biasanya aku lebih prefer **cara manual** (bagian runbook di atas) supaya tidak ada “kejutan” dari script.
+Pastikan package `docker-compose-plugin` terpasang dan cek:
+
+```bash
+docker compose version
+```
+
+#### 9.3 Lupa lokasi `docker-compose.yaml` SigNoz (tanpa tebak-tebakan)
+
+Dari user `cikal`, jalankan:
+
+```bash
+sudo docker compose ls
+```
+
+Lihat kolom **CONFIG FILES**; lalu jalankan:
+
+```bash
+sudo docker compose -f /PATH_YANG_MUNCUL ps
+```
+
+Kalau `compose ls` kosong, cari file compose:
+
+```bash
+sudo find /home -maxdepth 5 -type f \( -name "docker-compose.yml" -o -name "docker-compose.yaml" \) | grep -i signoz
+```
+
+#### 9.4 VM sering OOM / lambat
+
+Untuk 1 VM, kombinasi ClickHouse + collector memang bisa berat; PDF menyarankan naikkan RAM (8–16GB) dan pastikan SSD + cek disk free.\
+Dengan VM kamu (6GB), **SWAP** di langkah 1 biasanya cukup membantu menghindari crash, walau performa bisa turun saat swap aktif.
 
 ***
 
-### Troubleshooting cepat (yang paling sering)
+Kalau kamu mau, kirim output 2 perintah ini dari VM (biar aku bisa pastikan semuanya “sehat” di kondisi 6GB RAM):
 
-1. **UI tidak bisa dibuka di `<IP>:8080`**
-
-* Cek port 8080 terbuka (SG/NACL/UFW)
-*   Cek container:
-
-    ```bash
-    docker compose ps
-    ```
-*   Cek log:
-
-    ```bash
-    docker compose logs -f --tail=200
-    ```
-
-2. **`docker compose` tidak ada**
-
-*   Pastikan package `docker-compose-plugin` ter-install dan cek:
-
-    ```bash
-    docker compose version
-    ```
-
-    Rujukan instal Compose plugin: ([Docker Documentation](https://docs.docker.com/compose/install/linux/?utm_source=chatgpt.com))
-
-3. **VM sering OOM / lambat**
-
-* Untuk 1 VM, ClickHouse + collector bisa berat. Naikkan RAM (mulai 8–16GB), pastikan SSD, dan cek disk free.
+```bash
+docker compose -f ~/signoz/deploy/docker/docker-compose.yaml ps
+sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | head -n 30
+```
