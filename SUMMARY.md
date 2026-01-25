@@ -66,6 +66,7 @@
 * [Zabbix](zabbix/README.md)
   * [Install Zabbix](zabbix/install-zabbix.md)
 * [Kibana](kibana.md)
+* [APM Signoz](apm-signoz.md)
 * [Ansible](ansible.md)
 * [Jenkins](jenkins/README.md)
   * [Membuat Service Jenkins](jenkins/membuat-service-jenkins.md)
