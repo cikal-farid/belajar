@@ -285,3 +285,105 @@ Kalau kamu mau, kirim output 2 perintah ini dari VM (biar aku bisa pastikan semu
 docker compose -f ~/signoz/deploy/docker/docker-compose.yaml ps
 sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | head -n 30
 ```
+
+#### Tambahan
+
+Mantap—kalau sudah muncul lagi `demo-app`, berarti stack SigNoz kamu **sehat** sekarang ✅
+
+Soal pertanyaan kamu: **runbook kamu tidak “salah” secara instalasi**, tapi ada **1 bagian yang belum “robust” untuk kondisi setelah reboot**.
+
+#### Kenapa habis reboot kamu `curl` tapi UI kosong?
+
+Karena waktu itu **OTLP receiver di `signoz-otel-collector` tidak listen di 4317/4318**, sehingga:
+
+* `curl` → **hanya sampai ke `otlp-python`** (makanya “Hello bob” tetap muncul)
+* tapi `otlp-python` **gagal export traces/logs** (muncul `StatusCode.UNAVAILABLE`)
+* akibatnya **tidak ada data baru masuk ke SigNoz**, UI jadi kosong untuk time range “Last 5 minutes”.
+
+Kamu membuktikan sendiri:
+
+* dari `otlp-python` → `Connection refused` ke `signoz-otel-collector:4317/4318`
+* di collector `/proc/net/tcp` → `NOT LISTENING`
+* setelah kamu **restore `otel-collector-config.yaml`** dan recreate collector → log menunjukkan:
+  * `Starting GRPC server ... 0.0.0.0:4317`
+  * `Starting HTTP server ... 0.0.0.0:4318`\
+    dan test socket jadi `OK 4317` & `OK 4318`.
+
+Jadi akar masalahnya: **file bind-mount** `~/signoz/deploy/docker/otel-collector-config.yaml` yang dipakai collector itu sebelumnya **tidak sesuai / berubah / ter-truncate**, sehingga OTLP receiver tidak aktif saat container start setelah reboot.
+
+***
+
+### Supaya runbook kamu “anti-kendala” setelah reboot (yang perlu kamu tambahkan)
+
+#### A) Jadikan `otlp-python` auto-start
+
+Karena sebelumnya restart policy `no`, setelah reboot dia tidak otomatis hidup.
+
+Kalau kamu masih pakai `otlp-python` buat tes:
+
+```bash
+docker update --restart unless-stopped otlp-python
+```
+
+#### B) Tambahkan “smoke test setelah reboot” (wajib)
+
+Ini yang bikin kamu nggak ketipu “Hello bob” tapi sebenarnya trace tidak masuk.
+
+1. Pastikan collector listen:
+
+```bash
+python3 - <<'PY'
+import socket
+for port in (4317,4318):
+    try:
+        s=socket.create_connection(("127.0.0.1", port), timeout=2)
+        print("OTLP OK", port)
+        s.close()
+    except Exception as e:
+        print("OTLP FAIL", port, e)
+PY
+```
+
+2. Kalau sudah `OTLP OK`, baru generate trace:
+
+```bash
+curl "http://127.0.0.1:5002/?user=alice"
+curl "http://127.0.0.1:5002/?user=bob"
+```
+
+3. UI → Explorer Traces → **Last 15 minutes** → filter `service.name="demo-app"` → Run Query.
+
+#### C) Tambahkan “recovery one-liner” kalau OTLP FAIL (ini yang menyelamatkan kamu tadi)
+
+Kalau post-reboot test bilang `OTLP FAIL`, jalankan:
+
+```bash
+cd ~/signoz
+git checkout -- deploy/docker/otel-collector-config.yaml
+cd ~/signoz/deploy/docker
+docker compose up -d --force-recreate --no-deps otel-collector
+```
+
+***
+
+### Kenapa bisa berubah? (biar tidak kejadian lagi)
+
+Karena `otel-collector-config.yaml` itu **bind-mount dari host**, jadi kalau file itu:
+
+* pernah ke-edit (walau tidak sengaja),
+* pernah di-overwrite,
+* atau pernah jadi kosong/korup,
+
+maka setelah reboot collector start dengan config itu dan **OTLP receiver bisa hilang**.
+
+Kalau kamu mau ekstra aman: simpan backup “golden config” seperti yang sudah kamu buat, dan kalau perlu bikin file itu read-only (opsional).
+
+***
+
+Kalau kamu mau, aku bisa bantu “finalisasi runbook kamu” dengan 1 section tambahan:
+
+* **Post-reboot smoke test**
+* **Recovery**
+* dan **cara jaga `otel-collector-config.yaml` tetap golden**
+
+Cukup bilang kamu mau format runbook-nya seperti apa (markdown / step-by-step copy paste).
